@@ -12,7 +12,7 @@ import typer
 ROOT = Path(__file__).resolve().parents[1]
 VENDOR_SKILLSBENCH = ROOT / "vendor" / "skillsbench"
 AIP_DIR = ROOT / ".claude" / "skills" / "aip"
-AIP_REMOTE = "https://github.com/zach-blumenfeld/aip.git"
+AIP_REMOTE = "git@github.com:zach-blumenfeld/aip.git"
 GENERATED_SKILLS = ROOT / "generated-skills"
 JOBS_DIR = ROOT / "jobs"
 
