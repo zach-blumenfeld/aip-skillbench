@@ -11,6 +11,7 @@ import typer
 
 ROOT = Path(__file__).resolve().parents[1]
 VENDOR_SKILLSBENCH = ROOT / "vendor" / "skillsbench"
+VENDOR_SKILL_CREATOR = VENDOR_SKILLSBENCH / ".agents" / "skills" / "skill-creator"
 AIP_DIR = ROOT / ".claude" / "skills" / "aip"
 AIP_REMOTE = "git@github.com:zach-blumenfeld/aip.git"
 GENERATED_SKILLS = ROOT / "generated-skills"
@@ -53,6 +54,15 @@ def _require_aip() -> Path:
             f"AIP not installed at {AIP_DIR}. Run `aip-skillbench bootstrap` first."
         )
     return AIP_DIR
+
+
+def _require_skill_creator() -> Path:
+    if not (VENDOR_SKILL_CREATOR / "SKILL.md").exists():
+        raise typer.BadParameter(
+            f"skill-creator not found at {VENDOR_SKILL_CREATOR}. "
+            "Run `git submodule update --init` to populate vendor/skillsbench."
+        )
+    return VENDOR_SKILL_CREATOR
 
 
 def _bench(*args: str) -> int:
@@ -134,8 +144,9 @@ def eval(
     elif mode is Mode.human_curated:
         extra = ["--skills-dir", str(_curated_skills_dir(task))]
     elif mode is Mode.selfgen_skill_creator:
-        # skill-creator auto-discovered from ~/.claude/skills/skill-creator etc.
-        extra = ["--skill-mode", "self-gen"]
+        # Pin skill-creator to the SkillsBench-vendored copy for reproducibility,
+        # regardless of what's in the user's ~/.claude/skills/.
+        extra = ["--skill-mode", "self-gen", "--skill-creator-dir", str(_require_skill_creator())]
     elif mode in (Mode.aip_from_instruction, Mode.aip_from_curated):
         from_ = (
             ConvertFrom.instruction if mode is Mode.aip_from_instruction

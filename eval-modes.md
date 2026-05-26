@@ -85,16 +85,13 @@ Paper-style self-gen. Each trial spins up a fresh sandbox; the agent runs a *cre
 uv run aip-skillbench eval --task 3d-scan-calc --model claude-haiku-4-5 --mode selfgen-skill-creator
 ```
 
-Prereq: a `skill-creator` skill must be discoverable. `_resolve_skill_creator_root` in `benchflow/rollout.py:146-199` checks (in order): `--skill-creator-dir`, `$BENCHFLOW_SKILL_CREATOR_DIR`, repo `.claude/skills/skill-creator`, cwd `.claude/skills/skill-creator`, then `~/.claude/skills/skill-creator`, `~/.codex/skills/.system/skill-creator`, `~/.agents/skills/skill-creator`.
-
-The SkillsBench submodule vendors a copy at `vendor/skillsbench/.agents/skills/skill-creator/` — easiest reproducible setup is to point at it explicitly:
+Skill-creator source is pinned: `aip-skillbench eval --mode selfgen-skill-creator` always passes `--skill-creator-dir vendor/skillsbench/.agents/skills/skill-creator` to benchflow, so the same SHA of skill-creator is used regardless of what's in your `~/.claude/skills/`. This makes mode-3 results reproducible across machines.
 
 ```bash
-BENCHFLOW_SKILL_CREATOR_DIR=$(pwd)/vendor/skillsbench/.agents/skills/skill-creator \
-  uv run aip-skillbench eval --task 3d-scan-calc --model claude-haiku-4-5 --mode selfgen-skill-creator
+uv run aip-skillbench eval --task 3d-scan-calc --model claude-haiku-4-5 --mode selfgen-skill-creator
 ```
 
-Generated skills land under `jobs/<run>/<trial>/_self_gen/<task>-<hex>/` per trial.
+If you ever want to use a different skill-creator (e.g. an experimental version), call `bench eval create` directly with `--skill-creator-dir <path>`. Generated skills land under `jobs/<run>/<trial>/_self_gen/<task>-<hex>/` per trial.
 
 ### Reference run
 
