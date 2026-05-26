@@ -56,9 +56,15 @@ def _require_aip() -> Path:
 
 
 def _bench(*args: str) -> int:
-    """Invoke benchflow's `bench` CLI in the current uv env."""
-    cmd = ["uv", "run", "bench", *args]
-    typer.echo("$ " + " ".join(cmd))
+    """Invoke benchflow's `bench` CLI via our patched launcher.
+
+    We can't `uv run bench` directly: that spawns a Python process that never
+    imports aip_skillbench, so the benchflow monkey-patches in
+    aip_skillbench._benchflow_patch wouldn't apply. Going through
+    aip_skillbench._bench_launcher ensures the patches load first.
+    """
+    cmd = ["uv", "run", "python", "-m", "aip_skillbench._bench_launcher", *args]
+    typer.echo("$ uv run bench " + " ".join(args))  # log the user-friendly form
     return subprocess.call(cmd)
 
 
