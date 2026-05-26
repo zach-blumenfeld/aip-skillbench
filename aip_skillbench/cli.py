@@ -124,38 +124,76 @@ def eval(
     raise typer.Exit(_bench(*base, *extra))
 
 
+_CONVERT_PROMPT = """\
+Use the `aip` skill in ./.claude/skills/aip/ to convert the curated Agent
+Skill at:
+
+    {src}
+
+into an AIP-compliant skill at:
+
+    {dst}
+
+Requirements:
+1. Read {src}/SKILL.md. Produce {dst}/SKILL.md in AIP format per the aip
+   skill's specification (schema-validated YAML body, AIP frontmatter).
+2. Copy every other file under {src}/ (scripts/, references/, assets/, etc.)
+   verbatim into {dst}/, preserving the directory structure.
+3. Do not change the skill's `name:` frontmatter field — the task's mounted
+   skill name must match.
+4. Validate the result against the AIP schema before writing.
+
+Write nothing outside {dst}/. Do not modify {src}/."""
+
+
 @app.command()
 def convert(
     task: str = typer.Option(..., help="Task name; converts every skill under it."),
     force: bool = typer.Option(False, help="Overwrite existing converted output."),
+    claude_model: str = typer.Option(
+        "claude-opus-4-7", help="Model for the conversion call."
+    ),
 ) -> None:
     """Mode-5 step 1: convert curated skills under a task to AIP format.
 
-    NOT IMPLEMENTED — stub. The real conversion should invoke an LLM with AIP
-    mounted as a skill (see ./.claude/skills/aip) and feed it the curated SKILL.md
-    as input, writing the AIP version to generated-skills/<task>/aip-from-curated/.
+    Shells out to `claude -p` with the AIP skill mounted at ./.claude/skills/aip/
+    and writes the AIP version to generated-skills/<task>/aip-from-curated/<skill>/.
     """
     _require_aip()
-    src = _curated_skills_dir(task)
-    if not src.exists():
-        raise typer.BadParameter(f"no curated skills at {src}")
-    dst = _converted_skills_dir(task)
-    if dst.exists() and not force:
-        raise typer.BadParameter(f"already exists: {dst} (pass --force to overwrite)")
+    src_root = _curated_skills_dir(task)
+    if not src_root.exists():
+        raise typer.BadParameter(f"no curated skills at {src_root}")
+    dst_root = _converted_skills_dir(task)
+    if dst_root.exists() and not force:
+        raise typer.BadParameter(f"already exists: {dst_root} (pass --force to overwrite)")
+    dst_root.mkdir(parents=True, exist_ok=True)
 
-    dst.mkdir(parents=True, exist_ok=True)
-    skills = [p for p in src.iterdir() if p.is_dir() and (p / "SKILL.md").exists()]
-    typer.echo(f"Found {len(skills)} curated skill(s) in {src}:")
-    for s in skills:
-        typer.echo(f"  - {s.name}")
-        # TODO: invoke AIP-conversion (LLM call) here and write to dst / s.name.
-        # For now, copy verbatim so the rest of the pipeline is exercisable.
-        target = dst / s.name
-        if target.exists():
-            shutil.rmtree(target)
-        shutil.copytree(s, target)
-    typer.echo(f"\nWrote {len(skills)} skill(s) to {dst}")
-    typer.echo("WARNING: conversion is a stub (copy). Implement real AIP authoring in cli.convert.")
+    skills = [p for p in src_root.iterdir() if p.is_dir() and (p / "SKILL.md").exists()]
+    if not skills:
+        raise typer.BadParameter(f"no skill dirs (with SKILL.md) under {src_root}")
+    typer.echo(f"Converting {len(skills)} skill(s) under task '{task}':")
+
+    for src in skills:
+        dst = dst_root / src.name
+        if dst.exists():
+            shutil.rmtree(dst)
+        typer.echo(f"\n→ {src.name}")
+        prompt = _CONVERT_PROMPT.format(src=src, dst=dst)
+        cmd = [
+            "claude", "-p", prompt,
+            "--model", claude_model,
+            "--add-dir", str(src),
+            "--add-dir", str(dst_root),
+            "--dangerously-skip-permissions",
+        ]
+        typer.echo("$ " + " ".join(cmd[:4]) + f" … --add-dir {src} --add-dir {dst_root} …")
+        rc = subprocess.call(cmd, cwd=ROOT)
+        if rc != 0:
+            raise typer.Exit(rc)
+        if not (dst / "SKILL.md").exists():
+            typer.echo(f"  WARNING: {dst}/SKILL.md not produced by Claude.")
+
+    typer.echo(f"\nWrote {len(skills)} skill(s) to {dst_root}")
 
 
 @app.command()
