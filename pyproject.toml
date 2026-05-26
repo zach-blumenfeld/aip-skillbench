@@ -1,0 +1,26 @@
+[project]
+name = "aip-skillbench"
+version = "0.1.0"
+description = "Evaluate AIP-formatted skills against the SkillsBench task corpus."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "benchflow[sandbox-daytona]",
+    "typer>=0.12",
+]
+
+[project.scripts]
+aip-skillbench = "aip_skillbench.cli:app"
+
+[tool.uv.sources]
+# Pin BenchFlow to a known-good SHA. Matches the pin used by SkillsBench
+# (see vendor/skillsbench/pyproject.toml). Bump deliberately, re-run `uv lock`.
+benchflow = { git = "https://github.com/benchflow-ai/benchflow.git", rev = "7a479e9f4bfaaeb11002cee58b99f777955bbb7e" }
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP"]
+ignore = ["E501"]

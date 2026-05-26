@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.uv-cache/
+*.egg-info/
+
+# Build
+dist/
+build/
+
+# Editor
+.vscode/
+.idea/
+.DS_Store
+
+# Run outputs — keep `jobs/` empty in git
+jobs/*
+!jobs/.gitkeep
+
+# Local-only env
+.env
+.env.local
+
+# AIP skill is cloned at bootstrap time; never committed.
+.claude/
+
+# uv lock kept in repo for reproducibility; do NOT add uv.lock here.
