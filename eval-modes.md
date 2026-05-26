@@ -3,8 +3,10 @@
 This repo extends [SkillsBench](https://www.skillsbench.ai) ([repo](https://github.com/benchflow-ai/skillsbench), [paper](https://www.skillsbench.ai/skillsbench.pdf)). SkillsBench is a containerized benchmark — 84+ tasks across 11 domains, run via the [BenchFlow SDK](https://github.com/benchflow-ai/benchflow) — that measures agent pass rate under three skill conditions: 
 
 1. **no skills** (mode 1), 
-2. **human-curated skills** authored offline by domain experts (mode 2). See the paper for the comparative findings across model + harness configurations.
+2. **human-curated skills** authored offline by domain experts (mode 2).
 3. **self-generated skills** authored by the same agent at trial time (mode 3).
+
+See the paper for the comparative findings across model + harness configurations.
 
 We add two AIP modes here, both experimental: 
 4. **AIP from instruction** (mode 4) and 
@@ -26,6 +28,18 @@ Five conditions per (task, model), distinguished by who/what authored the skill 
 
 Every mode runs the same solver call shape: `aip-skillbench eval --task <T> --model <M> --mode <name>`. The differences are the skill artifacts mounted into the container and when/by-whom they were authored.
 
+## Validation status (3d-scan-calc / claude-haiku-4-5, n=1)
+
+| Mode | Trial | Reward | Tool calls | Wall clock |
+|---|---|---|---|---|
+| 1 noskill | `3d-scan-calc__0edf4a0a` | 1.0 | 8 | 82.0 s |
+| 2 human-curated | `3d-scan-calc__1e05fcb6` | 1.0 | 5 | 51.6 s |
+| 3 selfgen-skill-creator | `3d-scan-calc__a2d82ebb` | 1.0 | 14 | 113.8 s |
+| 4 aip-from-instruction | `3d-scan-calc__fdaf7b47` | 1.0 | 9 | 84.4 s |
+| 5 aip-from-curated | `3d-scan-calc__2e275197` | 1.0 | 4 | 51.7 s |
+
+This task on Haiku is at ceiling — every mode passes. Differentiation will require harder tasks, weaker models, or n>1 per cell.
+
 ---
 
 ## Mode 1 — `noskill`
@@ -36,7 +50,11 @@ Baseline. Agent receives only `instruction.md` and the task's environment fixtur
 uv run aip-skillbench eval --task 3d-scan-calc --model claude-haiku-4-5 --mode noskill
 ```
 
-Status: wired, not yet validated end-to-end.
+### Reference run
+
+- Trial: `3d-scan-calc__0edf4a0a`
+- Reward: **1.0**, tool calls: 8, wall clock: 82.0 s
+- Skill activated: none (none mounted)
 
 ---
 
@@ -48,7 +66,14 @@ Mounts the human-authored skill that ships with the task. This is what the Skill
 uv run aip-skillbench eval --task 3d-scan-calc --model claude-haiku-4-5 --mode human-curated
 ```
 
-Skill location (host, read-only): `vendor/skillsbench/tasks/<task>/environment/skills/<skill-name>/`. Status: wired, not yet validated end-to-end.
+Skill location (host, read-only): `vendor/skillsbench/tasks/<task>/environment/skills/<skill-name>/`.
+
+### Reference run
+
+- Trial: `3d-scan-calc__1e05fcb6`
+- Skill mounted: `mesh-analysis` (the task's human-authored skill)
+- Reward: **1.0**, tool calls: 5, wall clock: 51.6 s
+- Skill activated via `Skill` tool: yes — `Launching skill: mesh-analysis`
 
 ---
 
@@ -60,7 +85,23 @@ Paper-style self-gen. Each trial spins up a fresh sandbox; the agent runs a *cre
 uv run aip-skillbench eval --task 3d-scan-calc --model claude-haiku-4-5 --mode selfgen-skill-creator
 ```
 
-Prereq: `~/.claude/skills/skill-creator/` must exist on the host. Auto-discovered by `_resolve_skill_creator_root` in `benchflow/rollout.py:146-199`. Generated skills land under `jobs/<run>/<trial>/_self_gen/<task>-<hex>/` per trial. Status: wired, not yet validated end-to-end.
+Prereq: a `skill-creator` skill must be discoverable. `_resolve_skill_creator_root` in `benchflow/rollout.py:146-199` checks (in order): `--skill-creator-dir`, `$BENCHFLOW_SKILL_CREATOR_DIR`, repo `.claude/skills/skill-creator`, cwd `.claude/skills/skill-creator`, then `~/.claude/skills/skill-creator`, `~/.codex/skills/.system/skill-creator`, `~/.agents/skills/skill-creator`.
+
+The SkillsBench submodule vendors a copy at `vendor/skillsbench/.agents/skills/skill-creator/` — easiest reproducible setup is to point at it explicitly:
+
+```bash
+BENCHFLOW_SKILL_CREATOR_DIR=$(pwd)/vendor/skillsbench/.agents/skills/skill-creator \
+  uv run aip-skillbench eval --task 3d-scan-calc --model claude-haiku-4-5 --mode selfgen-skill-creator
+```
+
+Generated skills land under `jobs/<run>/<trial>/_self_gen/<task>-<hex>/` per trial.
+
+### Reference run
+
+- Trial: `3d-scan-calc__a2d82ebb`
+- Skill-creator source: `vendor/skillsbench/.agents/skills/skill-creator/`
+- Reward: **1.0**, tool calls: 14 (creator scene + solver scene combined), wall clock: 113.8 s
+- Note: this is the only mode where authoring happens in-trial — the higher tool-call count and longer wall clock reflect the creator-then-solver two-scene flow inside one sandbox.
 
 ---
 
