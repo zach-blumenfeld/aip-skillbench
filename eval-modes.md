@@ -1,8 +1,16 @@
 # Eval Modes
 
-This repo extends [SkillsBench](https://www.skillsbench.ai) ([repo](https://github.com/benchflow-ai/skillsbench), [paper](https://www.skillsbench.ai/skillsbench.pdf)). SkillsBench is a containerized benchmark — 84+ tasks across 11 domains, run via the [BenchFlow SDK](https://github.com/benchflow-ai/benchflow) — that measures agent pass rate under three skill conditions: **no skills** (mode 1), **self-generated skills** authored by the same agent at trial time (mode 3), and **human-curated skills** authored offline by domain experts (mode 2). See the paper for the comparative findings across model + harness configurations.
+This repo extends [SkillsBench](https://www.skillsbench.ai) ([repo](https://github.com/benchflow-ai/skillsbench), [paper](https://www.skillsbench.ai/skillsbench.pdf)). SkillsBench is a containerized benchmark — 84+ tasks across 11 domains, run via the [BenchFlow SDK](https://github.com/benchflow-ai/benchflow) — that measures agent pass rate under three skill conditions: 
 
-We add two AIP modes here, both experimental: **AIP from instruction** (mode 4) and **AIP from human-curated** (mode 5). Both use Opus 4.7 to author once via the [AIP skill](https://github.com/zach-blumenfeld/aip), commit the result, and mount it across all trials — matching AIP's author-once-consume-many design pattern.
+1. **no skills** (mode 1), 
+2. **human-curated skills** authored offline by domain experts (mode 2). See the paper for the comparative findings across model + harness configurations.
+3. **self-generated skills** authored by the same agent at trial time (mode 3).
+
+We add two AIP modes here, both experimental: 
+4. **AIP from instruction** (mode 4) and 
+5. **AIP from human-curated** (mode 5). 
+
+Both use Opus 4.7 to author once via the [AIP skill](https://github.com/zach-blumenfeld/aip), commit the result, and mount it across all trials — matching AIP's author-once-consume-many design pattern.
 
 Five conditions per (task, model), distinguished by who/what authored the skill an agent has access to during a trial.
 
@@ -67,7 +75,25 @@ uv run aip-skillbench convert --task 3d-scan-calc --from instruction
 uv run aip-skillbench eval --task 3d-scan-calc --model claude-haiku-4-5 --mode aip-from-instruction
 ```
 
-Output (committed to git): `generated-skills/<task>/aip-from-instruction/<skill-name>/`. Status: `convert --from instruction` implemented; not yet exercised against a real task.
+Output (committed to git): `generated-skills/<task>/aip-from-instruction/<skill-name>/`.
+
+Notable difference from mode 5: the skill is authored from scratch, so Opus picks its own `<skill-name>` (e.g. `stl-mass-from-scan` for 3d-scan-calc, not the curated `mesh-analysis`), and any helper scripts are written by Opus rather than copied from a human-authored skill.
+
+### Reference run
+
+First validated mode-4 trial:
+
+- Task: `3d-scan-calc`
+- Model: `claude-haiku-4-5`
+- Agent: `claude-agent-acp`
+- Trial: `3d-scan-calc__fdaf7b47` (run `2026-05-26__17-44-58`)
+- Authored skill: `stl-mass-from-scan` (Opus-chosen name; includes its own stdlib-only `scripts/compute_mass.py` and a `references/binary_stl_format.md` explainer)
+- Reward: **1.0** (pass)
+- Tool calls: 9 (`Skill` launch → `Read` density table → `Terminal` STL size sanity-check → `Terminal` run `compute_mass.py --verbose` → `Read` the script → `Read` density again → …)
+- Wall clock: 84.4 s (env 6.1 + agent setup 0.6 + agent execution 60.0 + verifier 2.5)
+- Skill activated via `Skill` tool: yes — `Launching skill: stl-mass-from-scan`
+
+Comparison to mode-5 reference run on the same (task, model): both pass; mode-4 used 9 tool calls vs mode-5's 4, primarily because the Opus-authored skill ships a runnable script that the agent invoked directly and then sanity-checked, rather than writing its own glue code.
 
 ---
 
