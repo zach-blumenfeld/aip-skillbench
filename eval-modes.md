@@ -1,5 +1,9 @@
 # Eval Modes
 
+This repo extends [SkillsBench](https://www.skillsbench.ai) ([repo](https://github.com/benchflow-ai/skillsbench), [paper](https://www.skillsbench.ai/skillsbench.pdf)). SkillsBench is a containerized benchmark — 84+ tasks across 11 domains, run via the [BenchFlow SDK](https://github.com/benchflow-ai/benchflow) — that measures agent pass rate under three skill conditions: **no skills** (mode 1), **self-generated skills** authored by the same agent at trial time (mode 3), and **human-curated skills** authored offline by domain experts (mode 2). See the paper for the comparative findings across model + harness configurations.
+
+We add two AIP modes here, both experimental: **AIP from instruction** (mode 4) and **AIP from human-curated** (mode 5). Both use Opus 4.7 to author once via the [AIP skill](https://github.com/zach-blumenfeld/aip), commit the result, and mount it across all trials — matching AIP's author-once-consume-many design pattern.
+
 Five conditions per (task, model), distinguished by who/what authored the skill an agent has access to during a trial.
 
 ## Overview
