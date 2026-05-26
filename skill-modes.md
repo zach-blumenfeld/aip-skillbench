@@ -1,20 +1,6 @@
-# Eval Modes
+# Skill Modes
 
-This repo extends [SkillsBench](https://www.skillsbench.ai) ([repo](https://github.com/benchflow-ai/skillsbench), [paper](https://www.skillsbench.ai/skillsbench.pdf)). SkillsBench is a containerized benchmark — 84+ tasks across 11 domains, run via the [BenchFlow SDK](https://github.com/benchflow-ai/benchflow) — that measures agent pass rate under three skill conditions: 
-
-1. **no skills** (mode 1), 
-2. **human-curated skills** authored offline by domain experts (mode 2).
-3. **self-generated skills** authored by the same agent at trial time (mode 3).
-
-See the paper for the comparative findings across model + harness configurations.
-
-We add two AIP modes here, both experimental: 
-4. **AIP from instruction** (mode 4) and 
-5. **AIP from human-curated** (mode 5). 
-
-Both use Opus 4.7 to author once via the [AIP skill](https://github.com/zach-blumenfeld/aip), commit the result, and mount it across all trials — matching AIP's author-once-consume-many design pattern.
-
-Five conditions per (task, model), distinguished by who/what authored the skill an agent has access to during a trial.
+Runbook for the five evaluation conditions defined in the [README](README.md). For background on what each mode is and why, see the README; this doc focuses on how to run each, where the skill lives in the container, where results land, and how to audit them.
 
 ## Overview
 
@@ -22,7 +8,7 @@ Five conditions per (task, model), distinguished by who/what authored the skill 
 |---|---|---|---|---|
 | 1 noskill | — | — | — | nothing |
 | 2 human-curated | human | task domain expertise (no file) | offline | committed `vendor/skillsbench/tasks/<task>/environment/skills/` |
-| 3 skill-creator selfgen | same model as solver | `vendor/skillsbench/tasks/<task>/instruction.md` | per trial (in-sandbox) | freshly-generated skill (sandbox-local, ephemeral) |
+| 3 selfgen-skill-creator | same model as solver | `vendor/skillsbench/tasks/<task>/instruction.md` | per trial (in-sandbox) | freshly-generated skill (sandbox-local, ephemeral) |
 | 4 aip-from-instruction | Opus 4.7 | `vendor/skillsbench/tasks/<task>/instruction.md` | once, locked | committed `generated-skills/<task>/aip-from-instruction/` |
 | 5 aip-from-curated | Opus 4.7 | `vendor/skillsbench/tasks/<task>/instruction.md` + `vendor/skillsbench/tasks/<task>/environment/skills/` | once, locked | committed `generated-skills/<task>/aip-from-curated/` |
 
@@ -85,13 +71,7 @@ Paper-style self-gen. Each trial spins up a fresh sandbox; the agent runs a *cre
 uv run aip-skillbench eval --task 3d-scan-calc --model claude-haiku-4-5 --mode selfgen-skill-creator
 ```
 
-Skill-creator source is pinned: `aip-skillbench eval --mode selfgen-skill-creator` always passes `--skill-creator-dir vendor/skillsbench/.agents/skills/skill-creator` to benchflow, so the same SHA of skill-creator is used regardless of what's in your `~/.claude/skills/`. This makes mode-3 results reproducible across machines.
-
-```bash
-uv run aip-skillbench eval --task 3d-scan-calc --model claude-haiku-4-5 --mode selfgen-skill-creator
-```
-
-If you ever want to use a different skill-creator (e.g. an experimental version), call `bench eval create` directly with `--skill-creator-dir <path>`. Generated skills land under `jobs/<run>/<trial>/_self_gen/<task>-<hex>/` per trial.
+Skill-creator source is pinned: `aip-skillbench eval --mode selfgen-skill-creator` always passes `--skill-creator-dir vendor/skillsbench/.agents/skills/skill-creator` to benchflow, so the same SHA of skill-creator is used regardless of what's in your `~/.claude/skills/`. This makes mode-3 results reproducible across machines. If you ever want to use a different skill-creator (e.g. an experimental version), call `bench eval create` directly with `--skill-creator-dir <path>`. Generated skills land under `jobs/<run>/<trial>/_self_gen/<task>-<hex>/` per trial.
 
 ### Reference run
 

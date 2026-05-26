@@ -1,6 +1,20 @@
 # aip-skillbench
 
-Evaluate AIP-formatted skills against the [SkillsBench](https://www.skillsbench.ai) task corpus. Five evaluation conditions per (task, model) — see [skill-modes.md](skill-modes.md) for the full runbook.
+This repo extends [SkillsBench](https://www.skillsbench.ai) ([repo](https://github.com/benchflow-ai/skillsbench), [paper](https://www.skillsbench.ai/skillsbench.pdf)) to evaluate [AIP-formatted skills](https://github.com/zach-blumenfeld/aip).
+
+SkillsBench is a containerized benchmark — 84+ tasks across 11 domains, run via the [BenchFlow SDK](https://github.com/benchflow-ai/benchflow) — that measures agent pass rate under three skill conditions: 
+
+1. **no skills** (mode 1), 
+2. **human-curated skills** authored offline by domain experts (mode 2).
+3. **self-generated skills** authored by the same agent at trial time (mode 3).
+
+See the paper for the comparative findings across model + harness configurations.
+
+**We add two AIP modes here**, both experimental: 
+4. **AIP from instruction** (mode 4) and 
+5. **AIP from human-curated** (mode 5). 
+
+Both 4 & 5 use Opus 4.7 to author once via the [AIP skill](https://github.com/zach-blumenfeld/aip), commit the result, and mount it across all trials — matching AIP's author-once-consume-many design pattern.
 
 | # | Mode | Skill source |
 |---|---|---|
@@ -9,6 +23,9 @@ Evaluate AIP-formatted skills against the [SkillsBench](https://www.skillsbench.
 | 3 | `selfgen-skill-creator` | model writes its own skill at trial time (paper-style self-gen) |
 | 4 | `aip-from-instruction` | Opus 4.7 authors an AIP skill from `instruction.md` alone, locked & committed |
 | 5 | `aip-from-curated` | Opus 4.7 converts the human-authored skill to AIP, locked & committed |
+
+
+See [skill-modes.md](skill-modes.md) for the full runbook.
 
 ## Layout
 
@@ -56,3 +73,20 @@ aip-skillbench reward jobs/3d-scan-calc-aip-from-curated-claude-haiku-4-5/<times
 ```
 
 See [skill-modes.md](skill-modes.md) for each mode's authoring input, container mount paths, audit signals, and reference runs.
+
+## Agents & models
+
+The **solver** (the agent attempting each task during `eval`) can be any agent BenchFlow supports. Pass `--agent` to switch:
+
+```bash
+aip-skillbench eval --task 3d-scan-calc --model claude-haiku-4-5    --agent claude-agent-acp   # Anthropic (default)
+aip-skillbench eval --task 3d-scan-calc --model gpt-5.2-codex       --agent codex-acp          # OpenAI
+aip-skillbench eval --task 3d-scan-calc --model gemini-3-flash-preview --agent gemini          # Google
+```
+
+Each agent reads its own API key from `.env` (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`). The `--model` string is agent-specific.
+
+## Known limitations
+
+- **AIP authoring is Anthropic-only.** `aip-skillbench convert` (modes 4 & 5) shells out to Claude Code (`claude -p`) and defaults to `claude-opus-4-7` per AIP guidance. Authoring with OpenAI / Google models would require an adapter that mounts the AIP skill in those harnesses' prompt format. Solver evaluation is not restricted — see above.
+
