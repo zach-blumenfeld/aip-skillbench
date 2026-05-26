@@ -23,8 +23,13 @@ class Mode(str, Enum):
     noskill = "noskill"
     human_curated = "human-curated"
     selfgen_skill_creator = "selfgen-skill-creator"
-    selfgen_aip = "selfgen-aip"
+    aip_from_instruction = "aip-from-instruction"
     aip_from_curated = "aip-from-curated"
+
+
+class ConvertFrom(str, Enum):
+    instruction = "instruction"
+    curated = "curated"
 
 
 def _task_dir(task: str) -> Path:
@@ -38,8 +43,8 @@ def _curated_skills_dir(task: str) -> Path:
     return _task_dir(task) / "environment" / "skills"
 
 
-def _converted_skills_dir(task: str) -> Path:
-    return GENERATED_SKILLS / task / "aip-from-curated"
+def _generated_skills_dir(task: str, from_: ConvertFrom) -> Path:
+    return GENERATED_SKILLS / task / f"aip-from-{from_.value}"
 
 
 def _require_aip() -> Path:
@@ -55,6 +60,22 @@ def _bench(*args: str) -> int:
     cmd = ["uv", "run", "bench", *args]
     typer.echo("$ " + " ".join(cmd))
     return subprocess.call(cmd)
+
+
+def _run_claude(prompt: str, model: str, add_dirs: list[Path]) -> None:
+    """Shell out to `claude -p` with AIP discoverable from cwd."""
+    cmd = ["claude", "-p", prompt, "--model", model]
+    for d in add_dirs:
+        cmd += ["--add-dir", str(d)]
+    cmd += ["--dangerously-skip-permissions"]
+    typer.echo(
+        "$ claude -p <…prompt elided…> --model " + model
+        + "".join(f" --add-dir {d}" for d in add_dirs)
+        + " --dangerously-skip-permissions"
+    )
+    rc = subprocess.call(cmd, cwd=ROOT)
+    if rc != 0:
+        raise typer.Exit(rc)
 
 
 @app.command()
@@ -107,15 +128,18 @@ def eval(
     elif mode is Mode.human_curated:
         extra = ["--skills-dir", str(_curated_skills_dir(task))]
     elif mode is Mode.selfgen_skill_creator:
-        extra = ["--skill-mode", "self-gen"]
         # skill-creator auto-discovered from ~/.claude/skills/skill-creator etc.
-    elif mode is Mode.selfgen_aip:
-        extra = ["--skill-mode", "self-gen", "--skill-creator-dir", str(_require_aip())]
-    elif mode is Mode.aip_from_curated:
-        conv = _converted_skills_dir(task)
+        extra = ["--skill-mode", "self-gen"]
+    elif mode in (Mode.aip_from_instruction, Mode.aip_from_curated):
+        from_ = (
+            ConvertFrom.instruction if mode is Mode.aip_from_instruction
+            else ConvertFrom.curated
+        )
+        conv = _generated_skills_dir(task, from_)
         if not conv.exists() or not any(conv.iterdir()):
             raise typer.BadParameter(
-                f"No converted skills at {conv}. Run `aip-skillbench convert --task {task}` first."
+                f"No converted skills at {conv}. Run "
+                f"`aip-skillbench convert --task {task} --from {from_.value}` first."
             )
         extra = ["--skills-dir", str(conv)]
     else:
@@ -124,7 +148,7 @@ def eval(
     raise typer.Exit(_bench(*base, *extra))
 
 
-_CONVERT_PROMPT = """\
+_PROMPT_FROM_CURATED = """\
 Use the `aip` skill in ./.claude/skills/aip/ to convert the curated Agent
 Skill at:
 
@@ -146,54 +170,110 @@ Requirements:
 Write nothing outside {dst}/. Do not modify {src}/."""
 
 
+_PROMPT_FROM_INSTRUCTION = """\
+Use the `aip` skill in ./.claude/skills/aip/ to author one or more
+AIP-compliant Agent Skills that would help a downstream agent solve the
+task described in:
+
+    {instruction_path}
+
+Write the skill pack(s) into:
+
+    {dst_root}/<skill-name>/SKILL.md (plus scripts/, references/, assets/ as needed)
+
+Requirements:
+1. Read ONLY {instruction_path}. Do not inspect or copy from any existing
+   skills directory under the task — this mode authors from the
+   instruction alone, not from a human-written skill.
+2. Author the reusable procedural knowledge an agent needs to solve this
+   task type. Pick concise `<skill-name>` value(s); the directory name
+   under {dst_root}/ must match the skill's `name:` frontmatter.
+3. Include any scripts or assets that would help the solver — this skill
+   is the only thing the solver will have, besides the task environment.
+4. Every produced SKILL.md must validate against the AIP schema. Run
+   `uv run .claude/skills/aip/scripts/validate.py <skill-dir>` before
+   considering the work complete.
+
+Write nothing outside {dst_root}/. Do not modify the task source."""
+
+
 @app.command()
 def convert(
-    task: str = typer.Option(..., help="Task name; converts every skill under it."),
+    task: str = typer.Option(..., help="Task name under vendor/skillsbench/tasks/."),
+    from_: ConvertFrom = typer.Option(
+        ConvertFrom.curated,
+        "--from",
+        case_sensitive=False,
+        help="Authoring input: 'curated' (existing skill) or 'instruction' (instruction.md only).",
+    ),
     force: bool = typer.Option(False, help="Overwrite existing converted output."),
-    claude_model: str = typer.Option(
-        "claude-opus-4-7", help="Model for the conversion call."
+    author_model: str = typer.Option(
+        "claude-opus-4-7",
+        "--author-model",
+        help="Model used to author. Per AIP spec, use the largest available frontier model.",
     ),
 ) -> None:
-    """Mode-5 step 1: convert curated skills under a task to AIP format.
+    """Produce an AIP skill pack for `task`, by Opus authoring offline.
 
-    Shells out to `claude -p` with the AIP skill mounted at ./.claude/skills/aip/
-    and writes the AIP version to generated-skills/<task>/aip-from-curated/<skill>/.
+    `--from curated` — convert each skill under
+    `vendor/skillsbench/tasks/<task>/environment/skills/` to AIP, preserving
+    names and copying scripts verbatim. Output: `generated-skills/<task>/aip-from-curated/<skill>/`.
+
+    `--from instruction` — author one or more AIP skills from
+    `vendor/skillsbench/tasks/<task>/instruction.md` alone. Output:
+    `generated-skills/<task>/aip-from-instruction/<skill>/`.
     """
     _require_aip()
+    dst_root = _generated_skills_dir(task, from_)
+    if dst_root.exists() and not force:
+        raise typer.BadParameter(f"already exists: {dst_root} (pass --force to overwrite)")
+    if dst_root.exists():
+        shutil.rmtree(dst_root)
+    dst_root.mkdir(parents=True)
+
+    if from_ is ConvertFrom.curated:
+        _convert_from_curated(task, dst_root, author_model)
+    else:
+        _convert_from_instruction(task, dst_root, author_model)
+
+
+def _convert_from_curated(task: str, dst_root: Path, author_model: str) -> None:
     src_root = _curated_skills_dir(task)
     if not src_root.exists():
         raise typer.BadParameter(f"no curated skills at {src_root}")
-    dst_root = _converted_skills_dir(task)
-    if dst_root.exists() and not force:
-        raise typer.BadParameter(f"already exists: {dst_root} (pass --force to overwrite)")
-    dst_root.mkdir(parents=True, exist_ok=True)
-
     skills = [p for p in src_root.iterdir() if p.is_dir() and (p / "SKILL.md").exists()]
     if not skills:
         raise typer.BadParameter(f"no skill dirs (with SKILL.md) under {src_root}")
-    typer.echo(f"Converting {len(skills)} skill(s) under task '{task}':")
+    typer.echo(f"Converting {len(skills)} curated skill(s) under task '{task}':")
 
     for src in skills:
         dst = dst_root / src.name
-        if dst.exists():
-            shutil.rmtree(dst)
         typer.echo(f"\n→ {src.name}")
-        prompt = _CONVERT_PROMPT.format(src=src, dst=dst)
-        cmd = [
-            "claude", "-p", prompt,
-            "--model", claude_model,
-            "--add-dir", str(src),
-            "--add-dir", str(dst_root),
-            "--dangerously-skip-permissions",
-        ]
-        typer.echo("$ " + " ".join(cmd[:4]) + f" … --add-dir {src} --add-dir {dst_root} …")
-        rc = subprocess.call(cmd, cwd=ROOT)
-        if rc != 0:
-            raise typer.Exit(rc)
+        _run_claude(
+            _PROMPT_FROM_CURATED.format(src=src, dst=dst),
+            model=author_model,
+            add_dirs=[src, dst_root],
+        )
         if not (dst / "SKILL.md").exists():
             typer.echo(f"  WARNING: {dst}/SKILL.md not produced by Claude.")
-
     typer.echo(f"\nWrote {len(skills)} skill(s) to {dst_root}")
+
+
+def _convert_from_instruction(task: str, dst_root: Path, author_model: str) -> None:
+    instruction_path = _task_dir(task) / "instruction.md"
+    if not instruction_path.exists():
+        raise typer.BadParameter(f"no instruction.md at {instruction_path}")
+    typer.echo(f"Authoring AIP skill(s) for task '{task}' from instruction.md alone…")
+    _run_claude(
+        _PROMPT_FROM_INSTRUCTION.format(instruction_path=instruction_path, dst_root=dst_root),
+        model=author_model,
+        add_dirs=[instruction_path.parent, dst_root],
+    )
+    produced = [p for p in dst_root.iterdir() if p.is_dir() and (p / "SKILL.md").exists()]
+    if not produced:
+        typer.echo(f"WARNING: no SKILL.md files produced under {dst_root}")
+    else:
+        typer.echo(f"\nWrote {len(produced)} skill(s) to {dst_root}: {[p.name for p in produced]}")
 
 
 @app.command()

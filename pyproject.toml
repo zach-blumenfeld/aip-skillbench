@@ -12,6 +12,10 @@ dependencies = [
 [project.scripts]
 aip-skillbench = "aip_skillbench.cli:app"
 
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [tool.uv.sources]
 # Pin BenchFlow to a known-good SHA. Matches the pin used by SkillsBench
 # (see vendor/skillsbench/pyproject.toml). Bump deliberately, re-run `uv lock`.
