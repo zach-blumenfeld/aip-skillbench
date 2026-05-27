@@ -241,6 +241,7 @@ def convert(
     `generated-skills/<task>/aip-from-instruction/<skill>/`.
     """
     _require_aip()
+    _task_dir(task)  # validate before we touch the filesystem
     dst_root = _generated_skills_dir(task, from_)
     if dst_root.exists() and not force:
         raise typer.BadParameter(f"already exists: {dst_root} (pass --force to overwrite)")
@@ -291,6 +292,120 @@ def _convert_from_instruction(task: str, dst_root: Path, author_model: str) -> N
         typer.echo(f"WARNING: no SKILL.md files produced under {dst_root}")
     else:
         typer.echo(f"\nWrote {len(produced)} skill(s) to {dst_root}: {[p.name for p in produced]}")
+
+
+class BatchFrom(str, Enum):
+    instruction = "instruction"
+    curated = "curated"
+    both = "both"
+
+
+def _discover_tasks(pattern: str) -> list[str]:
+    tasks_dir = VENDOR_SKILLSBENCH / "tasks"
+    return sorted(
+        p.name for p in tasks_dir.glob(pattern)
+        if p.is_dir() and (p / "instruction.md").exists()
+    )
+
+
+def _already_done(task: str, from_: ConvertFrom) -> bool:
+    d = _generated_skills_dir(task, from_)
+    if not d.exists():
+        return False
+    return any(child.is_dir() and (child / "SKILL.md").exists() for child in d.iterdir())
+
+
+def _convert_one(task: str, from_value: str, author_model: str, force: bool) -> tuple[str, str, int, float, str]:
+    """Run one `aip-skillbench convert` invocation as a subprocess. Returns (task, from, rc, secs, tail)."""
+    import time
+    cmd = [
+        "uv", "run", "aip-skillbench", "convert",
+        "--task", task, "--from", from_value,
+        "--author-model", author_model,
+    ]
+    if force:
+        cmd.append("--force")
+    t0 = time.time()
+    proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
+    secs = time.time() - t0
+    tail = (proc.stderr or proc.stdout).splitlines()[-1] if (proc.stderr or proc.stdout) else ""
+    return task, from_value, proc.returncode, secs, tail[:140]
+
+
+@app.command("batch-convert")
+def batch_convert(
+    from_: BatchFrom = typer.Option(
+        BatchFrom.both, "--from", case_sensitive=False, help="Which mode(s) to author."
+    ),
+    concurrency: int = typer.Option(4, "--concurrency", "-j", help="Parallel claude calls."),
+    force: bool = typer.Option(False, help="Re-author even if output exists."),
+    pattern: str = typer.Option("*", help="Glob filter on task names."),
+    limit: int = typer.Option(0, help="Cap number of conversions (0 = all)."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the 5s confirm pause."),
+    author_model: str = typer.Option("claude-opus-4-7", "--author-model"),
+) -> None:
+    """Author AIP skills for many tasks at once. Skips already-converted output unless --force."""
+    import concurrent.futures
+    import time
+
+    _require_aip()
+
+    froms: list[ConvertFrom] = (
+        [ConvertFrom.instruction, ConvertFrom.curated]
+        if from_ is BatchFrom.both
+        else [ConvertFrom(from_.value)]
+    )
+
+    tasks = _discover_tasks(pattern)
+    work: list[tuple[str, ConvertFrom]] = []
+    skipped = 0
+    for task in tasks:
+        for f in froms:
+            if not force and _already_done(task, f):
+                skipped += 1
+                continue
+            work.append((task, f))
+    if limit > 0:
+        work = work[:limit]
+
+    typer.echo(f"Batch convert: {len(tasks)} tasks × {len(froms)} mode(s) = {len(tasks) * len(froms)} cells")
+    typer.echo(f"  to author: {len(work)}   skipped (already done): {skipped}")
+    typer.echo(f"  concurrency: {concurrency}   author model: {author_model}")
+    typer.echo(f"  est. cost (very rough): ~${0.5 * len(work):.0f}   est. wall clock: ~{2 * len(work) / max(concurrency,1):.0f} min")
+    if not work:
+        typer.echo("Nothing to do.")
+        raise typer.Exit(0)
+
+    if not yes:
+        typer.echo("\nStarting in 5s — Ctrl-C to abort.")
+        for i in range(5, 0, -1):
+            typer.echo(f"  {i}…", nl=False)
+            time.sleep(1)
+        typer.echo()
+
+    t_start = time.time()
+    done = failed = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as ex:
+        futures = {
+            ex.submit(_convert_one, task, f.value, author_model, force): (task, f.value)
+            for task, f in work
+        }
+        total = len(futures)
+        for fut in concurrent.futures.as_completed(futures):
+            task, fv, rc, secs, tail = fut.result()
+            done += 1
+            status = "OK" if rc == 0 else f"FAIL(rc={rc})"
+            if rc != 0:
+                failed += 1
+            typer.echo(
+                f"[{done:>3}/{total}] {status:9s} {task:40s} --from {fv:11s} "
+                f"({secs:5.1f}s) {tail}"
+            )
+    elapsed = time.time() - t_start
+    typer.echo()
+    typer.echo(f"Done in {elapsed/60:.1f} min. {done - failed} succeeded, {failed} failed.")
+    if failed:
+        raise typer.Exit(1)
 
 
 @app.command()
