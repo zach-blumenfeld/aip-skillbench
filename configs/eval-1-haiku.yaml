@@ -1,0 +1,13 @@
+tasks:
+  - 3d-scan-calc
+  - debug-trl-grpo
+  - earthquake-phase-association
+  - fix-druid-loophole-cve
+  - taxonomy-tree-merge
+  - video-silence-remover
+models:
+  - claude-haiku-4-5-20251001
+trials: 5
+concurrency: 4
+agent: claude-agent-acp
+sandbox: docker
