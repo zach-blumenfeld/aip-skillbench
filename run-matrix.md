@@ -52,11 +52,43 @@ docker system df                                # watch growth
 docker system prune -f --filter "until=2h"      # prune stuff older than 2h
 ```
 
-**macOS gotcha**: Docker Desktop pauses the VM when your Mac sleeps; a long matrix run will hang silently. For overnight runs, prefix with `caffeinate`:
+## Long / overnight runs (macOS)
+
+A full 150-cell campaign runs 3–5 hours; the laptop must stay awake the whole time or Docker's VM pauses and the run stalls silently. Three things together keep it alive:
+
+**1. `caffeinate` — block macOS sleep.**
 
 ```bash
-caffeinate -dimsu uv run aip-skillbench run-matrix --config configs/big-run.yaml --yes
+caffeinate -dimsu uv run aip-skillbench run-matrix \
+  --config configs/eval-1-haiku.yaml --out runs/eval-1-haiku --yes
 ```
+
+Flags: `-d` display, `-i` idle, `-m` disk, `-s` system, `-u` declare user active. **`-s` only works on AC power** — if you're on battery and the threshold trips, the system will sleep regardless.
+
+**2. Lid open, AC plugged in.** Closing the lid forces clamshell sleep even with `caffeinate` running, unless you have an external display + keyboard + mouse connected. The Docker Desktop VM pauses when the system sleeps, containers stall, wall clock burns for nothing.
+
+**3. Terminal window must stay open.** When you close a terminal window, macOS sends `SIGHUP` to its child processes and kills the run. For overnight durability use `tmux` so you can detach and safely close the window:
+
+```bash
+tmux new -s eval-haiku
+# inside tmux:
+caffeinate -dimsu uv run aip-skillbench run-matrix \
+  --config configs/eval-1-haiku.yaml --out runs/eval-1-haiku --yes
+# Ctrl-b then d to detach. Close terminal. Lid open. Plug in. Sleep.
+# Tomorrow:
+tmux attach -t eval-haiku
+```
+
+**Nested tmux gotcha**: if you start `tmux new` from inside an already-active tmux session, the inner session's prefix is shadowed by the outer one — `Ctrl-b d` won't detach. Check with `echo $TMUX` *before* starting tmux. If nested, press the prefix twice: `Ctrl-b Ctrl-b d`.
+
+**Monitoring from another shell** (won't disturb the run):
+
+```bash
+tail -f runs/eval-1-haiku/summary.jsonl     # stream completed cells
+cat   runs/eval-1-haiku/status.json         # latest totals snapshot
+```
+
+**Safety net**: if anything kills the run (terminal closed, Docker crash, OS update, the cat sat on the keyboard), the same command in the morning resumes from `summary.jsonl` — no work lost.
 
 ## Flags
 
