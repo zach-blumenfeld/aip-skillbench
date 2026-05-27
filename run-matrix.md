@@ -19,6 +19,45 @@ Defaults: all 5 modes, concurrency 4, agent `claude-agent-acp`, sandbox `docker`
 
 The campaign writes to `runs/<YYYY-MM-DD__HH-MM-SS>/`. Override with `--out`.
 
+## Docker prerequisites
+
+Every cell runs in its own Docker container, so Docker Desktop's resource limits are the floor on what your matrix can do. Defaults (~7.7 GB RAM, 64 GB disk) are tight for `-j 4` and break on heavier tasks.
+
+**Recommended Docker Desktop settings** (Settings → Resources):
+
+| Setting | Default | Recommended | Why |
+|---|---|---|---|
+| Memory | ~7.7 GB | **12–16 GB** | ~2 GB per concurrent cell. OOM during `pip install` shows up as opaque `compose build` failures. |
+| Swap | 1 GB | 2–4 GB | Cheap insurance for build spikes. |
+| Disk image size | 64 GB | **≥ 128 GB** | bench builds a fresh project per trial; image cache + dangling layers accumulate fast across 95 tasks × 5 modes × N trials. |
+| CPUs | (system) | leave as-is | Rarely the bottleneck. |
+| File sharing | VirtioFS | **VirtioFS** (verify in Settings → General) | osxfs makes host↔container IO during build painfully slow. |
+
+The corpus is mostly lightweight (56/95 tasks use `ubuntu:24.04`, 24/95 use `python:3.12-slim`), but a few outliers (e.g. `debug-trl-grpo`, the suricata-based intrusion-detection task) need real headroom. No GPU is required — the solver model runs in Anthropic's cloud, the sandbox is CPU-only.
+
+**Concurrency sizing rule of thumb**: ~2 GB RAM per slot. With 16 GB Docker memory, `-j 6` is comfortable. Above `-j 8` you'll start racing the Anthropic per-org rate limit for `claude-haiku-4-5`; the runner surfaces 429s as cell errors (`·` in the live table) without aborting.
+
+**Pre-run sanity check**:
+
+```bash
+docker info | grep -E "Memory|CPUs"            # confirm new limits applied
+docker system prune -af                         # clean slate before a big run
+docker system df                                # confirm headroom
+```
+
+**Mid-run housekeeping** (separate shell, won't kill active containers):
+
+```bash
+docker system df                                # watch growth
+docker system prune -f --filter "until=2h"      # prune stuff older than 2h
+```
+
+**macOS gotcha**: Docker Desktop pauses the VM when your Mac sleeps; a long matrix run will hang silently. For overnight runs, prefix with `caffeinate`:
+
+```bash
+caffeinate -dimsu uv run aip-skillbench run-matrix --config configs/big-run.yaml --yes
+```
+
 ## Flags
 
 | Flag | Repeatable | Default | Notes |
