@@ -199,6 +199,47 @@ uv run aip-skillbench run-matrix --config configs/full-haiku.yaml --yes
 
 `--force` ignores the existing summary and re-runs everything; old entries remain in `summary.jsonl` (downstream analysis should dedupe on the latest `started_at` per `(task, model, mode, trial)`).
 
+### Retrying errored cells
+
+Resume skips **any** cell already in `summary.jsonl` — including `status: "error"` rows. So a transient failure (Anthropic 429, credit balance hit, docker hiccup) lands as a permanent `·` unless you do something about it. To retry only the errored cells, filter them out of `summary.jsonl` first and then re-run — the gaps come back as "to run" and the passes/fails stay untouched.
+
+```bash
+# 1. Back up first.
+cp runs/<campaign>/summary.jsonl runs/<campaign>/summary.jsonl.bak
+cp runs/<campaign>/summary.csv   runs/<campaign>/summary.csv.bak
+
+# 2. Strip error rows from the resume index.
+python3 -c "
+from pathlib import Path
+p = Path('runs/<campaign>/summary.jsonl')
+kept = [l for l in p.read_text().splitlines()
+        if l.strip() and '\"status\": \"error\"' not in l]
+p.write_text('\n'.join(kept) + '\n')
+print(f'kept {len(kept)} non-error rows')
+"
+
+# 3. Mirror the filter into summary.csv so downstream analysis matches.
+python3 -c "
+import csv
+from pathlib import Path
+p = Path('runs/<campaign>/summary.csv')
+rows = list(csv.DictReader(p.open()))
+keep = [r for r in rows if r['status'] != 'error']
+with p.open('w', newline='') as f:
+    w = csv.DictWriter(f, fieldnames=rows[0].keys())
+    w.writeheader()
+    w.writerows(keep)
+print(f'kept {len(keep)} rows')
+"
+
+# 4. Re-run the original command — resume picks up exactly the gaps.
+uv run aip-skillbench run-matrix --config <same-config> --out runs/<campaign> --yes
+```
+
+If the original run is still in flight when you discover the issue, you have two options: wait for it to finish (cleaner; the in-flight cells finish recording first), or `Ctrl-C` to stop now and recover both the recorded errors and the four in-flight slots in one pass.
+
+Use `--force` only when you actually want to re-run passes and fails too — for retrying transient errors, the surgical filter is cheaper and preserves the existing data.
+
 ## Concurrency notes
 
 - The outer pool runs `--concurrency` cells in parallel. Each cell shells out to `aip-skillbench eval --concurrency 1`, so each subprocess is exactly one trial in one Docker container.
