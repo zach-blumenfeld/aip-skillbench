@@ -24,7 +24,9 @@ What to run:
   - Trials: 5 per (task, mode)
   - Total: 6 × 5 × 5 = 150 cells
   - Concurrency: 4
-  - Expected wall clock: ~60–90 min
+  - Expected wall clock: ~3–5 hours (pilot showed some tasks have cells
+    running 15–25 min; with concurrency 4 and partial-credit tasks like
+    taxonomy-tree-merge in the mix, throughput is ~0.5–1 cell/min)
   - Expected cost: ~$10–15 in Anthropic tokens
 
 Step 1 — pre-flight checks. Confirm Docker is running and has enough
