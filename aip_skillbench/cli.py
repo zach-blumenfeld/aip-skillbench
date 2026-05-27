@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
+from typing import Optional
 
 import typer
 
@@ -339,7 +341,10 @@ def batch_convert(
     ),
     concurrency: int = typer.Option(4, "--concurrency", "-j", help="Parallel claude calls."),
     force: bool = typer.Option(False, help="Re-author even if output exists."),
-    pattern: str = typer.Option("*", help="Glob filter on task names."),
+    pattern: str = typer.Option("*", help="Glob filter on task names. Ignored if --task is given."),
+    tasks_explicit: list[str] = typer.Option(
+        [], "--task", help="Explicit task name; repeatable. If any --task is given, --pattern is ignored."
+    ),
     limit: int = typer.Option(0, help="Cap number of conversions (0 = all)."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the 5s confirm pause."),
     author_model: str = typer.Option("claude-opus-4-7", "--author-model"),
@@ -356,7 +361,13 @@ def batch_convert(
         else [ConvertFrom(from_.value)]
     )
 
-    tasks = _discover_tasks(pattern)
+    if tasks_explicit:
+        missing = [t for t in tasks_explicit if not (VENDOR_SKILLSBENCH / "tasks" / t / "instruction.md").exists()]
+        if missing:
+            raise typer.BadParameter(f"task(s) not found: {missing}")
+        tasks = sorted(set(tasks_explicit))
+    else:
+        tasks = _discover_tasks(pattern)
     work: list[tuple[str, ConvertFrom]] = []
     skipped = 0
     for task in tasks:
@@ -406,6 +417,77 @@ def batch_convert(
     typer.echo(f"Done in {elapsed/60:.1f} min. {done - failed} succeeded, {failed} failed.")
     if failed:
         raise typer.Exit(1)
+
+
+@app.command("run-matrix")
+def run_matrix_cmd(
+    tasks_explicit: list[str] = typer.Option(
+        [], "--task", help="Repeatable. Task name under vendor/skillsbench/tasks/."
+    ),
+    models_explicit: list[str] = typer.Option(
+        [], "--model", help="Repeatable. Model string (agent-specific)."
+    ),
+    modes_explicit: list[Mode] = typer.Option(
+        [], "--mode", case_sensitive=False, help="Repeatable. Default: all 5 modes."
+    ),
+    trials: Optional[int] = typer.Option(
+        None, "--trials", help="Trials per (task, model, mode). Default 1."
+    ),
+    concurrency: Optional[int] = typer.Option(
+        None, "--concurrency", "-j", help="Max concurrent cells. Default 4."
+    ),
+    config: Optional[Path] = typer.Option(
+        None, "--config", help="YAML config (CLI flags override matching keys)."
+    ),
+    out: Optional[Path] = typer.Option(
+        None, "--out", help="Campaign output dir. Default: runs/<timestamp>/."
+    ),
+    agent: Optional[str] = typer.Option(None, "--agent", help="Solver agent name."),
+    sandbox: Optional[str] = typer.Option(None, "--sandbox", help="docker | daytona | modal."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the 5s confirm pause."),
+    force: bool = typer.Option(False, "--force", help="Re-run cells already in summary.jsonl."),
+    shuffle: bool = typer.Option(False, "--shuffle", help="Randomize cell execution order."),
+) -> None:
+    """Run a (task × model × mode × trial) eval matrix concurrently with live progress."""
+    from aip_skillbench.run_matrix import ALL_MODES, run_matrix
+
+    cfg: dict = {}
+    if config:
+        import yaml
+        if not config.exists():
+            raise typer.BadParameter(f"config not found: {config}")
+        cfg = yaml.safe_load(config.read_text()) or {}
+
+    tasks_resolved = list(tasks_explicit) or list(cfg.get("tasks", []))
+    models_resolved = list(models_explicit) or list(cfg.get("models", []))
+    if modes_explicit:
+        modes_resolved = list(modes_explicit)
+    elif "modes" in cfg:
+        modes_resolved = [Mode(m) for m in cfg["modes"]]
+    else:
+        modes_resolved = list(ALL_MODES)
+    trials_resolved = trials if trials is not None else int(cfg.get("trials", 1))
+    concurrency_resolved = (
+        concurrency if concurrency is not None else int(cfg.get("concurrency", 4))
+    )
+    agent_resolved = agent if agent is not None else cfg.get("agent", "claude-agent-acp")
+    sandbox_resolved = sandbox if sandbox is not None else cfg.get("sandbox", "docker")
+    out_resolved = out or (ROOT / "runs" / datetime.now().strftime("%Y-%m-%d__%H-%M-%S"))
+
+    rc = run_matrix(
+        tasks=tasks_resolved,
+        models=models_resolved,
+        modes=modes_resolved,
+        trials=trials_resolved,
+        concurrency=concurrency_resolved,
+        out=out_resolved,
+        agent=agent_resolved,
+        sandbox=sandbox_resolved,
+        yes=yes,
+        force=force,
+        shuffle=shuffle,
+    )
+    raise typer.Exit(rc)
 
 
 @app.command()

@@ -18,6 +18,9 @@ build/
 jobs/*
 !jobs/.gitkeep
 
+# Campaign outputs from `aip-skillbench run-matrix`
+runs/
+
 # Local-only env
 .env
 .env.local

@@ -74,6 +74,8 @@ aip-skillbench reward jobs/3d-scan-calc-aip-from-curated-claude-haiku-4-5/<times
 
 See [skill-modes.md](skill-modes.md) for each mode's authoring input, container mount paths, audit signals, and reference runs.
 
+To sweep many `(task × model × mode × trial)` combinations concurrently with live progress, see [run-matrix.md](run-matrix.md).
+
 ## Agents & models
 
 The **solver** (the agent attempting each task during `eval`) can be any agent BenchFlow supports. Pass `--agent` to switch:
