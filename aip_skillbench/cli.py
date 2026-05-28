@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from datetime import datetime
@@ -80,18 +81,44 @@ def _bench(*args: str) -> int:
     return subprocess.call(cmd)
 
 
+def _read_dotenv(path: Path) -> dict[str, str]:
+    """Minimal .env parser — KEY=VALUE lines, ignores comments/blanks."""
+    if not path.exists():
+        return {}
+    out: dict[str, str] = {}
+    for line in path.read_text().splitlines():
+        s = line.strip()
+        if not s or s.startswith("#") or "=" not in s:
+            continue
+        k, _, v = s.partition("=")
+        out[k.strip()] = v.strip().strip('"').strip("'")
+    return out
+
+
 def _run_claude(prompt: str, model: str, add_dirs: list[Path]) -> None:
-    """Shell out to `claude -p` with AIP discoverable from cwd."""
+    """Shell out to `claude -p` with AIP discoverable from cwd.
+
+    Authoring bills against the `.env` ANTHROPIC_API_KEY when present, so it
+    uses the same API account as eval (not whatever account `claude` is logged
+    into). The .env value takes precedence over any inherited env var.
+    """
     cmd = ["claude", "-p", prompt, "--model", model]
     for d in add_dirs:
         cmd += ["--add-dir", str(d)]
     cmd += ["--dangerously-skip-permissions"]
+
+    env = os.environ.copy()
+    key = _read_dotenv(ROOT / ".env").get("ANTHROPIC_API_KEY")
+    key_src = "inherited env" if not key else ".env"
+    if key:
+        env["ANTHROPIC_API_KEY"] = key
+
     typer.echo(
         "$ claude -p <…prompt elided…> --model " + model
         + "".join(f" --add-dir {d}" for d in add_dirs)
-        + " --dangerously-skip-permissions"
+        + f" --dangerously-skip-permissions   [ANTHROPIC_API_KEY: {key_src}]"
     )
-    rc = subprocess.call(cmd, cwd=ROOT)
+    rc = subprocess.call(cmd, cwd=ROOT, env=env)
     if rc != 0:
         raise typer.Exit(rc)
 
