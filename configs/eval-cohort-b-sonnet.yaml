@@ -15,7 +15,7 @@ models:
 modes:
   - human-curated
   - aip-from-curated
-trials: 10
-concurrency: 6
+trials: 5
+concurrency: 8
 agent: claude-agent-acp
 sandbox: docker
