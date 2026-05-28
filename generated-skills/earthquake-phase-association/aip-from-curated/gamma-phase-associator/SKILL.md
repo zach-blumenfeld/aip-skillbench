@@ -1,294 +1,252 @@
 ---
 name: gamma-phase-associator
-description: An overview of the python package for running the GaMMA earthquake phase association algorithm. The algorithm expects phase picks data and station data as input and produces (through unsupervised clustering) earthquake events with source information like earthquake location, origin time and magnitude. The skill explains commonly used functions and the expected input/output format.
+description: Run the GaMMA earthquake phase-association algorithm — cluster P/S phase picks plus station metadata into earthquake events with origin time, hypocenter location, and magnitude via Bayesian or standard Gaussian Mixture Models (unsupervised clustering + Expectation-Maximization). Use when associating seismic phase picks into events, building an earthquake catalog from picker output, or when the user mentions GaMMA, phase association, the `association` or `estimate_eps` functions, or needs event times/locations from P and S picks. Covers the picks/stations DataFrame schemas, the config dict keys, DBSCAN eps estimation, and the (events, assignments) output format.
 metadata:
   aip:
-    spec: https://github.com/zach-blumenfeld/aip/tree/v0.2
-    schemaId: https://raw.githubusercontent.com/zach-blumenfeld/aip/v0.2/assets/aip-schemas/procedure.schema.json
+    spec: https://github.com/zach-blumenfeld/aip/tree/v0.3a2
+    schemaId: https://raw.githubusercontent.com/zach-blumenfeld/aip/v0.3a2/assets/aip-schemas/procedure.schema.json
+compatibility: Requires Python 3 with the GaMMA library (pip install git+https://github.com/wayneweiqiang/GaMMA.git), pandas, and pyproj. Build-config script is stdlib-only.
 ---
 
 ```yaml
 purpose: >
-  Reference for using the GaMMA Python library (https://github.com/AI4EPS/GaMMA) to
-  associate seismic P/S phase picks with earthquake events. GaMMA treats association
-  as unsupervised clustering: a Bayesian (or standard) Gaussian Mixture Model fit via
-  Expectation-Maximization assigns picks to events and estimates each event's
-  hypocenter (x, y, z), origin time, and magnitude. This skill documents the core
-  API (`association`, `estimate_eps`), the expected DataFrame schemas for picks and
-  stations, the configuration dictionary, and the returned event/assignment
-  structures. It assumes P/S picks have already been produced upstream.
-  Citation - Zhu, W., McBrearty, I. W., Mousavi, S. M., Ellsworth, W. L., & Beroza,
-  G. C. (2022). Earthquake phase association using a Bayesian Gaussian mixture
-  model. Journal of Geophysical Research - Solid Earth, 127(5).
+  Run GaMMA phase association: take P/S phase picks and station metadata and,
+  through unsupervised clustering, group picks into earthquake events with
+  source information (hypocenter location, origin time, and magnitude). GaMMA
+  models each event's picks with a multivariate Gaussian and uses
+  Expectation-Maximization to assign picks and estimate source parameters; it
+  is exposed as the `gamma.utils.association` function with a companion
+  `estimate_eps` helper for DBSCAN pre-clustering. Beyond general agent
+  knowledge this skill supplies the exact `picks`/`stations` DataFrame schemas
+  GaMMA requires, the full config-dict key reference, the documented defaults
+  and the BGMM/GMM oversample rule (encoded in a config-builder script), and
+  the shape of the `(events, assignments)` return value.
 
 trigger_when:
-  - User needs to associate already-extracted P/S phase picks into discrete earthquake events.
-  - User mentions GaMMA, phase association, pick-to-event clustering, or unsupervised earthquake catalog building.
-  - User wants to estimate hypocenter location, origin time, or magnitude from a stream of phase picks plus station metadata.
-  - User asks about the input DataFrame schema, configuration dictionary, or return structure for the `gamma` / `gamma.utils` library.
-  - User needs an appropriate DBSCAN `eps` value for pre-clustering picks by time (use `estimate_eps`).
+  - Associating seismic P/S phase picks into earthquake events (clustering picks that belong to the same event).
+  - Building an earthquake catalog (unique events with timestamps and locations) from phase-picker output.
+  - Estimating event origin time, hypocenter, or magnitude from picks plus station coordinates.
+  - User mentions GaMMA, phase association, BGMM/GMM phase clustering, or the `association` / `estimate_eps` functions.
+  - Choosing or tuning a DBSCAN `eps` for pre-clustering picks before association.
 
 do_not_use_when:
-  - Raw waveform data has not yet been processed into P/S picks - run a phase picker first (e.g., PhaseNet, EQTransformer).
-  - The task is single-event location refinement from already-associated picks (use a dedicated locator like HypoInverse, NonLinLoc).
-  - The task is moment tensor inversion, focal mechanism estimation, or waveform-based magnitude refinement.
+  - You still need to detect or pick P/S phases from raw waveforms — that is a picker's job (e.g. a SeisBench/PhaseNet model); return here once picks exist.
+  - The task is single-station event detection with no association/clustering across stations.
+  - A different associator (e.g. REAL, PyOcto) is explicitly required — the config keys and I/O here are GaMMA-specific.
 
 scope_and_approval: >
-  Read-only reference for an agent that will write Python that imports
-  `gamma.utils.association` and `gamma.utils.estimate_eps`. The skill prescribes
-  input shapes, config keys, and output handling; it does not itself execute
-  association runs. Installing the GaMMA package via pip (a network + environment
-  mutation) should be confirmed with the user before running.
+  Read-and-compute: GaMMA reads the picks and stations DataFrames and computes
+  events in memory; it performs no destructive operations. Writing the
+  resulting event catalog to a file is done by the agent, not by GaMMA. Safe
+  to run without prompting. Installing the GaMMA package from its git URL is a
+  network/install action — proceed if the environment permits package installs.
 
 steps:
   - name: install-gamma
-    description: |
-      Install the GaMMA package from its upstream Git repository:
+    description: >
+      Ensure the GaMMA library is importable. If not installed, run
+      `pip install git+https://github.com/wayneweiqiang/GaMMA.git`. The public
+      API is `from gamma.utils import association, estimate_eps`. pandas and
+      pyproj are also needed for the DataFrame prep and coordinate projection.
+    outputs:
+      - name: gamma-available
+        type: boolean
+        description: True once `from gamma.utils import association, estimate_eps` succeeds.
 
-      ```
-      pip install git+https://github.com/wayneweiqiang/GaMMA.git
-      ```
+  - name: prepare-stations
+    description: >
+      Build the `stations` DataFrame with the columns GaMMA requires: `id`,
+      `x(km)`, `y(km)`, `z(km)`. Construct `id` to match the picks (commonly
+      `network.station.` or `network.station.location.channel`). Project each
+      station's longitude/latitude into a local km coordinate system with
+      pyproj (e.g. an azimuthal-equidistant projection centered on the region
+      origin) to get `x(km)`/`y(km)`; set `z(km)` from elevation as
+      `-elevation_m / 1000` (depth-positive, so elevation is negative). Collapse
+      to one row per `id`: identical attributes become a single value,
+      conflicting metadata is preserved as a sorted list —
+      `stations.groupby("id").agg(lambda x: x.iloc[0] if len(set(x)) == 1 else sorted(list(x))).reset_index()`.
+      This step stays prose because the source CSV's column names and the
+      projection origin are task-specific (not known at authoring time). Full
+      column schema and notes are in references/association-api.md.
+    depends_on: [install-gamma]
+    inputs:
+      - name: raw-stations
+        type: object
+        description: Source station metadata (e.g. a CSV with network/station/channel/longitude/latitude/elevation columns).
+      - name: projection-origin
+        type: object
+        description: Region reference (longitude0, latitude0) used to build the local km projection.
+    outputs:
+      - name: stations
+        type: object
+        description: DataFrame with id, x(km), y(km), z(km), one row per station id.
 
-      GaMMA is not on PyPI; the git URL is the canonical install path. Confirm
-      with the user before adding it to a managed environment.
+  - name: prepare-picks
+    description: >
+      Build the `picks` DataFrame with columns `id`, `timestamp`, `type`,
+      `prob`, and (only if `use_amplitude=True`) `amp`. `id` MUST exactly match
+      the stations' `id` — pick one convention (e.g. `network.station.`) and
+      apply it to BOTH frames. Pickers often emit a fuller trace id like
+      `network.station.location.channel` (e.g. "CI.CCC..BHZ"), so normalize it
+      down to the station-level id you used for stations; if the two formats
+      differ, association silently drops every pick and you get zero events.
+      `timestamp` must be UTC — a naive/tz-stripped UTC datetime or an ISO
+      string like "2019-07-04T22:00:06.084" both work. `type` is the lowercase
+      phase `"p"`/`"s"`; `prob` is the pick weight in 0-1. The DataFrame index
+      tracks pick identity in the output `assignments`. When
+      `use_amplitude=True`, GaMMA filters picks with `amp == 0` or `amp == -1`.
+      This step stays prose because the picks come from a task-specific picker
+      output. Full column schema in references/association-api.md.
+    depends_on: [install-gamma]
+    inputs:
+      - name: raw-picks
+        type: object
+        description: Phase picks from a picker (per pick - station id, arrival time, phase type, probability, optional amplitude).
+    outputs:
+      - name: picks
+        type: object
+        description: DataFrame with id, timestamp, type, prob, optional amp.
 
-  - name: prepare-picks-dataframe
-    description: |
-      Build the `picks` DataFrame. Each row is one phase pick.
-
-      Required columns:
-
-      | Column      | Type          | Description                                                  | Example                                                       |
-      |-------------|---------------|--------------------------------------------------------------|---------------------------------------------------------------|
-      | `id`        | str           | Station identifier (must match the `stations` DataFrame)     | `network.station.` or `network.station.location.channel`      |
-      | `timestamp` | datetime/str  | Pick arrival time (ISO format or datetime)                   | `"2019-07-04T22:00:06.084"`                                   |
-      | `type`      | str           | Phase type: `"p"` or `"s"` (lowercase)                       | `"p"`                                                         |
-      | `prob`      | float         | Pick probability / weight in [0, 1]                          | `0.94`                                                        |
-      | `amp`       | float         | Amplitude in m/s (required if `use_amplitude=True`)          | `0.000017`                                                    |
-
-      Notes:
-      - Timestamps must be in UTC or converted to UTC.
-      - Phase types are forced to lowercase internally.
-      - Picks with `amp == 0` or `amp == -1` are filtered when `use_amplitude=True`.
-      - The DataFrame index is used to track pick identities in the output `assignments`.
-
-  - name: prepare-stations-dataframe
-    description: |
-      Build the `stations` DataFrame. Each row is one station with a projected
-      local coordinate.
-
-      Required columns:
-
-      | Column   | Type  | Description                                       | Example       |
-      |----------|-------|---------------------------------------------------|---------------|
-      | `id`     | str   | Station identifier                                | `"CI.CCC..BH"`|
-      | `x(km)`  | float | X coordinate in km (projected)                    | `-35.6`       |
-      | `y(km)`  | float | Y coordinate in km (projected)                    | `45.2`        |
-      | `z(km)`  | float | Z coordinate (elevation, typically negative)      | `-0.67`       |
-
-      Notes:
-      - Coordinates should be in a projected local coordinate system. The
-        `pyproj` package is a typical choice for projecting lat/lon to km.
-      - The `id` column must match the `id` values in the `picks` DataFrame
-        (e.g., `network.station.` or `network.station.location.channel`).
-      - Group stations by unique `id`: identical attributes collapse to a single
-        value; conflicting metadata is preserved as a sorted list.
-
-  - name: configure-association
-    description: |
-      Build the `config` dictionary that controls association behavior.
-
-      Required keys:
-
-      | Key                 | Type        | Description                                          | Example                                            |
-      |---------------------|-------------|------------------------------------------------------|----------------------------------------------------|
-      | `dims`              | list[str]   | Location dimensions to solve for                     | `["x(km)", "y(km)", "z(km)"]`                      |
-      | `min_picks_per_eq`  | int         | Minimum picks required per earthquake                | `5`                                                |
-      | `max_sigma11`       | float       | Maximum allowed time residual in seconds             | `2.0`                                              |
-      | `use_amplitude`     | bool        | Whether to use amplitude in clustering               | `True`                                             |
-      | `bfgs_bounds`       | tuple       | Bounds for BFGS optimization                         | `((-35, 92), (-128, 78), (0, 21), (None, None))`   |
-      | `oversample_factor` | float       | Factor for oversampling initial GMM components       | `5.0` for `BGMM`, `1.0` for `GMM`                  |
-
-      Notes on `dims`:
-      - Valid options: `["x(km)", "y(km)", "z(km)"]`, `["x(km)", "y(km)"]`, or `["x(km)"]`.
-
-      Notes on `bfgs_bounds`:
-      - Format: `((x_min, x_max), (y_min, y_max), (z_min, z_max), (None, None))`.
-      - The last tuple is for time and is unbounded.
-
-      Velocity model keys:
-
-      | Key       | Type      | Default                       | Description                            |
-      |-----------|-----------|-------------------------------|----------------------------------------|
-      | `vel`     | dict      | `{"p": 6.0, "s": 3.47}`       | Uniform velocity model (km/s)          |
-      | `eikonal` | dict/None | `None`                        | 1D velocity model for travel times     |
-
-      DBSCAN pre-clustering keys (optional):
-
-      | Key                             | Type  | Default | Description                                         |
-      |---------------------------------|-------|---------|-----------------------------------------------------|
-      | `use_dbscan`                    | bool  | `True`  | Enable DBSCAN pre-clustering                        |
-      | `dbscan_eps`                    | float | `25`    | Max time between picks (seconds)                    |
-      | `dbscan_min_samples`            | int   | `3`     | Min samples in DBSCAN neighborhood                  |
-      | `dbscan_min_cluster_size`       | int   | `500`   | Min cluster size for hierarchical splitting         |
-      | `dbscan_max_time_space_ratio`   | float | `10`    | Max time/space ratio for splitting                  |
-
-      Set `dbscan_eps` from the `estimate-dbscan-eps` step.
-
-      Filtering keys (optional):
-
-      | Key                   | Type  | Default | Description                                                            |
-      |-----------------------|-------|---------|------------------------------------------------------------------------|
-      | `max_sigma22`         | float | `1.0`   | Max phase amplitude residual in log scale (required if `use_amplitude=True`) |
-      | `max_sigma12`         | float | `1.0`   | Max covariance                                                         |
-      | `max_sigma11`         | float | `2.0`   | Max phase time residual (s)                                            |
-      | `min_p_picks_per_eq`  | int   | `0`     | Min P-phase picks per event                                            |
-      | `min_s_picks_per_eq`  | int   | `0`     | Min S-phase picks per event                                            |
-      | `min_stations`        | int   | `5`     | Min unique stations per event                                          |
-
-      Other optional keys:
-
-      | Key                | Type        | Default | Description                                       |
-      |--------------------|-------------|---------|---------------------------------------------------|
-      | `covariance_prior` | list[float] | auto    | Prior for covariance `[time, amp]`                |
-      | `ncpu`             | int         | auto    | Number of CPUs for parallel processing            |
-
-  - name: estimate-dbscan-eps
-    description: |
-      Use `gamma.utils.estimate_eps` to derive a DBSCAN `eps` (time-distance
-      threshold in seconds) from station geometry and P-wave velocity.
-
-      Signature:
-
-      ```python
-      def estimate_eps(stations, vp, sigma=2.0)
-      ```
-
-      Input parameters:
-
-      | Parameter  | Type      | Default  | Description                                       |
-      |------------|-----------|----------|---------------------------------------------------|
-      | `stations` | DataFrame | required | Station metadata with 3D coordinates              |
-      | `vp`       | float     | required | P-wave velocity in km/s                           |
-      | `sigma`    | float     | `2.0`    | Number of standard deviations above the mean      |
-
-      Required `stations` columns: `x(km)`, `y(km)`, `z(km)` (floats, km).
-
-      Returns: float, an epsilon value in **seconds** for use with DBSCAN clustering.
-
-      Example:
-
-      ```python
-      from gamma.utils import estimate_eps
-
-      vp = 6.0  # P-wave velocity in km/s
-      eps = estimate_eps(stations, vp, sigma=2.0)
-
-      config = {
-          "use_dbscan": True,
-          "dbscan_eps": eps,
-          "dbscan_min_samples": 3,
-          # ... other config options
-      }
-      ```
-
-      Practical notes:
-      - In example notebooks, this function is often commented out in favor of
-        hardcoded values (10-15 seconds).
-      - Practitioners may prefer manual tuning for specific networks/regions.
-      - Typical output values range from 10-20 seconds depending on station density.
-      - Most useful when optimal `eps` is unknown or when working with a new network.
+  - name: build-config
+    description: >
+      Assemble the GaMMA `config` dict with scripts/build_gamma_config.py. It
+      encodes the documented defaults and rules so the config is consistent:
+      the method->oversample_factor rule (BGMM=5.0, GMM=1.0), numeric defaults
+      (min_picks_per_eq=5, max_sigma11=2.0, max_sigma12=1.0, dbscan_min_samples=3,
+      vel={"p":6.0,"s":3.47}), bfgs_bounds built in the documented
+      ((x_min,x_max),(y_min,y_max),(z_min,z_max),(None,None)) shape from
+      per-dim bounds, and the use_amplitude->max_sigma22 dependency. Supply the
+      region bounds (project the region's lon/lat extent into km for x/y; depth
+      range for z), the method, and use_amplitude. `dbscan_eps` is not computed
+      by the script — estimate it with `estimate_eps(stations, config["vel"]["p"])`
+      or set a manual value (10-15 s is common); see references/estimate-eps-api.md.
+      Pass any other documented key (eikonal, covariance_prior, ncpu,
+      min_p/s_picks_per_eq, min_stations, dbscan_min_cluster_size,
+      dbscan_max_time_space_ratio) through `extra`. Prefer importing
+      `build_gamma_config` so bfgs_bounds keeps Python tuples and the unbounded
+      time slot stays (None, None). Full key reference in
+      references/association-api.md.
+    script: scripts/build_gamma_config.py
+    depends_on: [prepare-stations]
+    inputs:
+      - name: bounds
+        type: object
+        description: 'Per-dim (min, max) km extents, e.g. {"x(km)": (xmin,xmax), "y(km)": (ymin,ymax), "z(km)": (0,30)}.'
+      - name: method
+        type: string
+        description: '"BGMM" (Bayesian, default) or "GMM" (standard).'
+      - name: use_amplitude
+        type: boolean
+      - name: dbscan_eps
+        type: float
+        description: DBSCAN eps in seconds, from estimate_eps(stations, vp) or a manual 10-15 s value.
+    outputs:
+      - name: config
+        type: object
+        description: Validated GaMMA config dict ready to pass to association().
 
   - name: run-association
-    description: |
-      Call `gamma.utils.association` to cluster picks into events.
+    description: >
+      Call `events, assignments = association(picks, stations, config, event_idx0, method)`
+      with `event_idx0=0` and `method=config["method"]`. Returns a tuple:
+      `events` (list[dict], one per associated earthquake) and `assignments`
+      (list of (pick_index, event_index, gamma_score) tuples). If `events` is
+      empty, no events were associated — revisit eps, min_picks_per_eq, the
+      bounds, or the pick quality. Return-value schema in
+      references/association-api.md.
+    depends_on: [prepare-picks, build-config]
+    inputs:
+      - name: picks
+        type: object
+      - name: stations
+        type: object
+      - name: config
+        type: object
+    outputs:
+      - name: events
+        type: list[object]
+        description: One dict per event with time, magnitude, x/y/z(km) hypocenter, gamma_score, pick counts, event_index.
+      - name: assignments
+        type: list[object]
+        description: (pick_index, event_index, gamma_score) tuples mapping picks to events.
 
-      Signature:
+  - name: build-catalog
+    description: >
+      Turn `events` into the catalog the task needs. Each event dict carries
+      `time` (ISO 8601 origin time with milliseconds), `x(km)`/`y(km)`/`z(km)`
+      hypocenter, `magnitude` (999 when use_amplitude=False), and `gamma_score`.
+      Convert to a DataFrame; project `x(km)`/`y(km)` back to longitude/latitude
+      with the inverse pyproj transform if geographic coordinates are needed;
+      depth is `z(km)`. A required `time` column should be ISO format without
+      timezone. Optionally join `assignments` back to the picks (on pick_index)
+      to label which picks formed each event.
+    depends_on: [run-association]
+    inputs:
+      - name: events
+        type: list[object]
+      - name: assignments
+        type: list[object]
+        nullable: true
+    outputs:
+      - name: catalog
+        type: object
+        description: Event catalog (e.g. DataFrame / CSV) with at least an ISO time column per event.
 
-      ```python
-      def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs)
-      ```
-
-      Input parameters:
-
-      | Parameter    | Type      | Default   | Description                                       |
-      |--------------|-----------|-----------|---------------------------------------------------|
-      | `picks`      | DataFrame | required  | Seismic phase pick data                           |
-      | `stations`   | DataFrame | required  | Station metadata with locations                   |
-      | `config`     | dict      | required  | Configuration parameters                          |
-      | `event_idx0` | int       | `0`       | Starting event index for numbering                |
-      | `method`     | str       | `"BGMM"`  | `"BGMM"` (Bayesian) or `"GMM"` (standard)         |
-
-      The function clusters picks on arrival time and amplitude, then fits GMMs
-      to estimate hypocenters, origin times, and magnitudes.
-
-  - name: interpret-results
-    description: |
-      `association` returns a tuple `(events, assignments)`.
-
-      `events` is a `list[dict]`. Each dict represents one associated earthquake:
-
-      | Key            | Type  | Description                                          |
-      |----------------|-------|------------------------------------------------------|
-      | `time`         | str   | Origin time (ISO 8601 with milliseconds)             |
-      | `magnitude`    | float | Estimated magnitude (`999` if `use_amplitude=False`) |
-      | `sigma_time`   | float | Time uncertainty (seconds)                           |
-      | `sigma_amp`    | float | Amplitude uncertainty (log10 scale)                  |
-      | `cov_time_amp` | float | Time-amplitude covariance                            |
-      | `gamma_score`  | float | Association quality score                            |
-      | `num_picks`    | int   | Total picks assigned                                 |
-      | `num_p_picks`  | int   | P-phase picks assigned                               |
-      | `num_s_picks`  | int   | S-phase picks assigned                               |
-      | `event_index`  | int   | Unique event index                                   |
-      | `x(km)`        | float | X coordinate of hypocenter                           |
-      | `y(km)`        | float | Y coordinate of hypocenter                           |
-      | `z(km)`        | float | Z coordinate (depth)                                 |
-
-      `assignments` is a `list[tuple]`. Each tuple is
-      `(pick_index, event_index, gamma_score)`:
-      - `pick_index`: index in the original `picks` DataFrame.
-      - `event_index`: associated event index (matches `events[i]["event_index"]`).
-      - `gamma_score`: probability/confidence of the assignment.
-
-decisions:
-  - signal: User has not specified a clustering method.
-    action: Default to `method="BGMM"` (Bayesian GMM) with `oversample_factor=5.0`; switch to `"GMM"` (with `oversample_factor=1.0`) only if the user requests standard GMM or BGMM is too slow.
-  - signal: Amplitude data (`amp` column) is unavailable or unreliable.
-    action: Set `use_amplitude=False`. Magnitudes in returned events will be `999` (sentinel); do not surface them as real magnitudes.
-  - signal: Optimal DBSCAN `eps` for the network is unknown.
-    action: Call `estimate_eps(stations, config["vel"]["p"])` and assign to `config["dbscan_eps"]`. For a familiar network, hardcoded 10-15 s is a common practitioner default.
-  - signal: Picks DataFrame contains rows with `amp == 0` or `amp == -1`.
-    action: Leave them in place when `use_amplitude=True` - GaMMA filters them internally. If `use_amplitude=False`, they are ignored.
-  - signal: User wants to solve for hypocenter in 2D only (e.g., shallow regional study).
-    action: Set `dims=["x(km)", "y(km)"]` and adjust `bfgs_bounds` to match the reduced dimensionality.
+search_shortcuts:
+  - category: References and scripts
+    body: >
+      references/association-api.md — full `association` reference: input
+      parameters, the picks and stations DataFrame column schemas, every config
+      dict key (required, velocity, DBSCAN, filtering, other) with types and
+      defaults, and the (events, assignments) return-value schema. Load when
+      preparing DataFrames, populating config, or parsing output.
+      references/estimate-eps-api.md — `estimate_eps` reference: signature,
+      required station columns, the seconds-valued return, usage patterns, and
+      practical notes (typical 10-20 s; often hardcoded to 10-15 s). Load when
+      choosing dbscan_eps. scripts/build_gamma_config.py — assembles and
+      validates the config dict (oversample rule, defaults, bfgs_bounds shape);
+      import build_gamma_config or run it on a JSON params file.
 
 scenarios:
-  - need: Run GaMMA on a freshly picked dataset with automatic DBSCAN eps.
-    context: Picks and stations DataFrames are already projected to km and indexed by station `id`.
-    action: |
-      ```python
-      from gamma.utils import association, estimate_eps
-
-      config["dbscan_eps"] = estimate_eps(stations, config["vel"]["p"])
-      events, assignments = association(picks, stations, config, method="BGMM")
-      ```
-    outcome: "`events` holds associated earthquake hypocenters/origins; `assignments` maps each pick row to one of those events with a confidence score."
-  - need: Reuse a hand-tuned DBSCAN eps for a familiar network instead of estimating it.
-    context: Operator has a long-running deployment and knows 15 s works well.
-    action: |
-      ```python
-      config["dbscan_eps"] = 15  # seconds, manual override
-      events, assignments = association(picks, stations, config)
-      ```
-    outcome: "Skips the `estimate_eps` call; behavior identical otherwise."
+  - need: Associate PhaseNet/SeisBench picks over a small network into an event catalog with timestamps.
+    context: >
+      Picks exist as (trace_id, peak_time, peak_value, phase). Stations are a
+      CSV of network/station/channel/lon/lat/elevation_m. Amplitudes are not
+      available.
+    action: >
+      Build picks (id=trace_id, timestamp=peak_time UTC, type=phase.lower(),
+      prob=peak_value). Build stations (id=`network.station.`, project lon/lat
+      to x/y km via pyproj aeqd centered on the region, z=-elevation_m/1000,
+      collapse by id). Build config with use_amplitude=False, method="BGMM",
+      dbscan_eps=estimate_eps(stations, 6.0), and region-derived x/y/z bounds.
+      Run association; sort events by time and write the `time` column in ISO
+      format without timezone.
+    outcome: A unique list of earthquake events with origin times (and locations) suitable for catalog evaluation.
+  - need: association returns an empty events list.
+    action: >
+      First verify the `id`s match between picks and stations (a format
+      mismatch silently drops every pick), that pick `type` is lowercase, and
+      that timestamps are UTC. Then re-check dbscan_eps (too small over-splits
+      clusters; 10-15 s is a common manual value), lower or confirm
+      min_picks_per_eq, and widen the bfgs_bounds / region extent so true
+      hypocenters are inside. On a small or sparse network also lower
+      min_stations (default 5) and dbscan_min_cluster_size (default 500) via
+      `extra` — either can suppress otherwise-valid events.
+    outcome: Clusters large enough to meet the thresholds form and events are produced.
+  - need: Amplitudes are available and you want magnitude estimates.
+    action: >
+      Add an `amp` column (m/s) to picks, set use_amplitude=True so the
+      config-builder includes max_sigma22, and drop picks with amp==0/-1
+      (GaMMA also filters these). Read magnitude and sigma_amp from each event.
+    outcome: Events carry real magnitude estimates instead of the 999 placeholder.
 
 anti_patterns:
-  - Passing pick timestamps in local time. GaMMA assumes UTC; mixed time zones silently corrupt clustering.
-  - Using lat/lon (degrees) in the `x(km)` / `y(km)` columns. Coordinates must be projected to a local km-based system (e.g., via `pyproj`) before passing to `association`.
-  - Mismatched `id` values between `picks` and `stations`. Picks whose station `id` is absent from `stations` cannot be associated.
-  - Forgetting to set `oversample_factor` per method (`5.0` for BGMM, `1.0` for GMM). Wrong values degrade convergence.
-  - Setting `use_amplitude=True` without populating `amp` (m/s) in `picks` or without setting `max_sigma22`.
-  - Treating the `magnitude=999` sentinel as a real magnitude. It only appears when `use_amplitude=False`.
-  - Using uppercase phase labels in `type` (e.g., `"P"`, `"S"`). They are forced lowercase internally; relying on the original case downstream will break joins.
-  - Confusing the index meanings in `assignments`. The first element is the pick DataFrame index, not a sequential pick counter - preserve the original `picks` index.
+  - Passing uppercase phase types — `type` must be lowercase "p"/"s" (GaMMA lowercases internally, but build them lowercase to avoid mismatches).
+  - Mismatched `id` values between picks and stations — association silently drops picks whose station id has no match. The usual cause is a granularity mismatch (picker emits `network.station.location.channel` while stations are `network.station.`); normalize both to one convention.
+  - Leaving timestamps in local time — pick `timestamp` must be UTC.
+  - Using BGMM with oversample_factor=1.0 (or GMM with 5.0) — the factor follows the method; let build_gamma_config set it.
+  - Forgetting the (None, None) time slot in bfgs_bounds, or shaping it as (min,max) — time is unbounded.
+  - Setting use_amplitude=True without an `amp` column (or without max_sigma22), or expecting a real magnitude when use_amplitude=False (it returns 999).
+  - Treating the estimate_eps output as a hard requirement — practitioners often override it with a manual 10-15 s value per network.
+  - Skipping the per-id station collapse — duplicate channel rows leave multiple rows per station and distort clustering.
 ```

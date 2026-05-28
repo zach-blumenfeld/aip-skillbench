@@ -1,36 +1,70 @@
 # obspy-data-api — AIP conversion notes
 
-Conversion of the curated Agent Skill at
-`vendor/skillsbench/tasks/earthquake-phase-association/environment/skills/obspy-data-api/`
-into AIP format.
+## What this skill is
+
+A faithful AIP conversion of the curated Agent Skill `obspy-data-api`
+(`original-SKILL.md` in this folder). It is a **reference / knowledge skill**:
+it teaches an agent the core *data* API of ObsPy — the standard objects
+(`Stream`/`Trace`, `Catalog`/`Event`, `Inventory`) used to parse common
+seismological file formats (MiniSEED, SAC, GSE2, …) and to manipulate data
+into the shape downstream consumers expect (ObsPy signal-processing routines
+or SeisBench's modeling API).
+
+In the `earthquake-phase-association` task the agent loads
+`/root/data/wave.mseed` into a `Stream` and hands it to SeisBench's PhaseNet
+picker — this skill supplies exactly that ObsPy-side knowledge. The skill is
+deliberately scoped to ObsPy's data API and does **not** cover the picking
+model or the association algorithm (those are separate concerns).
 
 ## Schema choice
 
-Reused `procedure.schema.json` (bundled here in `source/`). The original
-SKILL.md is reference material about ObsPy's data API rather than a strict
-runbook, but the procedure schema fits well when the API surface is reframed
-as a workflow: parse waveforms → inspect a Trace → manipulate the time series
-→ parse events → parse stations. Tables and the worked REPL example map
-naturally to `search_shortcuts` and `scenarios`. A new `reference` schema
-was not warranted for a single skill.
+Reuses `procedure.schema.json` (AIP v0.3a2), the only schema bundled in the
+project's `assets/aip-schemas/` and the schema every other skill in
+`generated-skills/` validates against. There is no dedicated `reference`
+schema in the project, and the AIP guidance biases strongly toward schema
+reuse over drafting a near-duplicate. The procedure schema fits: the API is
+expressed as a small graph of usage steps (load → inspect → process; read
+events; read stations; hand off downstream) connected by the objects that
+flow between them.
 
-## Source-to-body mapping
+## Why no `scripts/`
 
-| Source section                       | AIP body field                                |
-|--------------------------------------|-----------------------------------------------|
-| Top-level description                | frontmatter `description`, body `purpose`     |
-| Waveform Data → Summary / Structure  | `steps[parse-waveforms]`, `steps[inspect-trace]` |
-| Trace methods                        | `steps[manipulate-trace]`                     |
-| Waveform example (REPL block)        | `scenarios[0]`                                |
-| Event Metadata                       | `steps[parse-events]`                         |
-| Station Metadata                     | `steps[parse-stations]`                       |
-| Classes & Functions table            | `search_shortcuts[Classes & Functions]`       |
-| Modules table                        | `search_shortcuts[Modules]`                   |
-| QuakeML / FDSN StationXML references | inlined into `steps[parse-events]` / `steps[parse-stations]` |
+AIP best practice prioritizes `scripts/` for steps that contain conditional
+logic, lookup tables, numeric thresholds, or validation against fixed rules.
+This skill has **none of that** — it is pure API reference knowledge ("call
+`read()` to get a `Stream`; `Trace.stats` holds the metadata"). There is no
+decision logic to make consistent via code, so every step stays prose. The
+curated source likewise shipped no scripts. Inventing scripts here would add
+nothing an agent doesn't already get from the API description.
 
-## Frontmatter
+## Where source content went
 
-- `name` preserved as `obspy-data-api` (mounted skill name must match).
-- `description` preserved verbatim from the source SKILL.md.
-- `metadata.aip.spec` → `https://github.com/zach-blumenfeld/aip/tree/v0.2`
-- `metadata.aip.schemaId` → canonical procedure schema `$id`.
+| Source section (`original-SKILL.md`) | Destination |
+|---|---|
+| Waveform Data — Summary | body `purpose` + `read-waveforms` / `inspect-trace` steps |
+| Stream/Trace class structure (attrs + methods) | `read-waveforms` / `inspect-trace` / `process-traces` steps + `references/obspy-api-reference.md` |
+| Waveform worked example (`read()` REPL session) | `references/obspy-api-reference.md` |
+| Event Metadata (QuakeML, Catalog→Event hierarchy) | `read-event-metadata` step + reference file |
+| Station Metadata (StationXML, Inventory hierarchy) | `read-station-metadata` step + reference file |
+| Classes & Functions table | `references/obspy-api-reference.md` |
+| Modules table | `references/obspy-api-reference.md` |
+
+The full class-attribute breakdowns, the worked REPL example, and the two
+tables are bulky and only needed on demand, so they live in
+`references/obspy-api-reference.md` (progressive disclosure) and are pointed to
+from the relevant steps. The body keeps the high-frequency "how to use it"
+calls inline.
+
+## Deliberate notes
+
+- The `name` frontmatter field is kept exactly as the curated source
+  (`obspy-data-api`) so the task's mounted skill name matches.
+- The `description` is kept verbatim from the curated source — it is already
+  specific and keyword-rich, and the benchmark matches against it.
+- A `prepare-for-downstream` step was added to make explicit the handoff the
+  source description promises ("downstream use cases such as ObsPy's signal
+  processing routines or SeisBench's modeling API"). It is grounded in that
+  sentence and adds only a thin, accurate handoff hint — that SeisBench models
+  accept an ObsPy `Stream` (via `.classify()` / `.annotate()`) and that trace
+  ids and timing must be preserved. It is not a SeisBench tutorial; the picking
+  model and association logic stay out of scope (see `do_not_use_when`).

@@ -1,181 +1,216 @@
 ---
 name: seismic-picker-selection
-description: This is a summary the advantages and disadvantages of earthquake event detection and phase picking methods, shared by leading seismology researchers at the 2025 Earthquake Catalog Workshop. Use it when you have a seismic phase picking task at hand.
+description: Choose an earthquake event-detection / phase-picking method — STA/LTA, manual picking, deep-learning pickers, or template matching — by weighing generalizability, sensitivity, speed/ease-of-use, and false-positive rate against your data, resources, and goal. Consolidates tradeoff guidance shared by leading seismology researchers at the 2025 Earthquake Catalog Workshop. Use it whenever you have a seismic phase-picking or event-detection task and must pick the detection paradigm before building a catalog.
+compatibility: Method-selection guidance for seismic catalog building. The bundled recommender (`scripts/recommend_picker.py`) is pure-Python standard library — no external packages. Applying the chosen method needs its own stack (e.g. SeisBench + ObsPy + PyTorch for deep-learning picking).
 metadata:
   aip:
-    spec: https://github.com/zach-blumenfeld/aip/tree/v0.2
-    schemaId: https://raw.githubusercontent.com/zach-blumenfeld/aip/v0.2/assets/aip-schemas/procedure.schema.json
+    spec: https://github.com/zach-blumenfeld/aip/tree/v0.3a2
+    schemaId: https://raw.githubusercontent.com/zach-blumenfeld/aip/v0.3a2/assets/aip-schemas/procedure.schema.json
 ---
 
 ```yaml
 purpose: >
-  Guide selection among four earthquake event detection and phase picking
-  methods — STA/LTA, Template Matching, Deep Learning, and Manual — based on
-  their tradeoffs across generalizability (ability to find arbitrary
-  earthquake signals), sensitivity (ability to find small earthquakes), speed
-  and ease-of-use, and false-positive rate. Synthesizes guidance shared by
-  leading seismology researchers at the 2025 SSA Earthquake Catalog Workshop
-  (https://ai4eps.github.io/Earthquake_Catalog_Workshop/). Each method has
-  strengths and weaknesses; purpose and resources should guide the choice.
-  Key citations: Allen (1978) on STA/LTA; Perol et al. (2018) on deep
-  learning for seismic detection; Huang & Beroza (2015) on template
-  matching; Yoon and Shelly (2024), TSR on deep learning vs template
-  matching comparison; and Beauce, Tepp, Yoon, Yu, and Zhu, "Building a High
-  Resolution Earthquake Catalog from Raw Waveforms: A Step-by-Step Guide"
-  (SSA Annual Meeting, 2025).
+  Decide which earthquake event-detection / phase-picking method to use before
+  building a catalog. Four methods are on the table — STA/LTA, manual picking,
+  deep-learning pickers, and template matching — and each trades off
+  generalizability (finding arbitrary earthquake signals), sensitivity (finding
+  small earthquakes), speed/ease-of-use, and false-positive rate. This skill adds
+  the consolidated tradeoff knowledge that leading seismology researchers shared
+  at the 2025 Earthquake Catalog Workshop, plus a recommender that encodes the
+  comparison matrix and the guide's hard viability rules (template matching needs
+  a preexisting catalog of template waveforms; deep learning needs continuous
+  data) and returns a ranked, explained recommendation. Purpose and resources —
+  not defaults — should drive the choice.
 
 trigger_when:
-  - Starting a seismic phase picking task and need to choose a method.
-  - Building or expanding an earthquake catalog from raw waveforms.
-  - Evaluating tradeoffs between automated and manual phase pickers for a specific deployment context.
-  - Deciding between amplitude-based detection (STA/LTA), template matching, and deep-learning pickers.
-  - Planning processing for a temporary broadband or nodal deployment that needs an automatically generated local earthquake catalog.
+  - You have a seismic phase-picking or event-detection task and must choose a method.
+  - Deciding among STA/LTA, manual picking, deep-learning pickers, and template matching.
+  - Building an earthquake catalog from raw or continuous waveforms and choosing the detection paradigm.
+  - Weighing sensitivity vs false positives vs speed vs setup effort for detection/picking.
+  - Unsure whether your data and resources support template matching or deep learning at all.
+
+do_not_use_when:
+  - You have already chosen deep learning and need to apply a model (which model, which weights, annotate vs classify) — use the `seisbench-model-api` skill.
+  - You need to read, parse, or manipulate the waveform / station files (MSEED/SAC I/O, Stream/Trace handling, response removal) — use the `obspy-data-api` skill.
+  - You already have phase picks and need to associate them into earthquake events — use the `gamma-phase-associator` skill.
+  - You are tuning the parameters of an already-chosen method rather than selecting one.
+
+scope_and_approval: >
+  Read-only and advisory. This skill produces a method recommendation and
+  rationale; it does not run detection, modify data, or write outputs.
+  `scripts/recommend_picker.py` only reads its CLI/JSON inputs and prints to
+  stdout. The ranking is decision support, not a mandate — reason over the full
+  ranking (and its watch-outs) before committing, and confirm the choice with the
+  user if the task is ambiguous about goals or available data.
 
 steps:
-  - name: assess-context
+  - name: gather-requirements
     description: >
-      Inventory data and constraints — continuous seismic data availability,
-      station types (broadband, accelerometer, nodal, Raspberry Shake),
-      network density, presence/absence of a preexisting catalog with usable
-      template waveforms, compute budget, and whether processing must run in
-      real-time or can be offline.
-  - name: clarify-objective
-    description: >
-      Define the catalog requirements — desired completeness and magnitude
-      of completeness (Mc), spatial vs temporal resolution priorities,
-      whether the target is active sequences, sparse networks, or refining
-      an existing catalog, and the acceptable tolerance for false detections
-      and manual review effort.
+      Establish the constraints that drive the choice. Do you have a preexisting
+      catalog with good picks to extract template waveforms from? Is continuous
+      seismic data available? Is the existing network sparse or nonexistent? Do
+      you need real-time operation, maximum sensitivity to tiny events, low false
+      positives, or minimal setup/operator effort? What is the primary goal —
+      an automatic local catalog, real-time monitoring, maximum sensitivity, or
+      highest-precision picks? Capture these as a structured object.
+    outputs:
+      - name: requirements
+        type: object
+        description: >
+          Constraints + goal, e.g. {goal, have_templates, continuous_data,
+          sparse_network, find_novel_sources, active_sequence}.
+
   - name: review-tradeoffs
     description: >
-      Compare candidate methods on four axes — generalizability,
-      sensitivity, speed/ease-of-use, and false-positive rate — using the
-      per-method details captured in `modes`. Summary table — STA/LTA
-      (Generalizability High, Sensitivity Low, Speed Fast/Easy, False
-      Positives Many); Manual (High, High, Slow/Difficult, Few); Deep
-      Learning (High, High, Fast/Easy, Medium); Template Matching (Low,
-      High, Slow/Difficult, Few).
-  - name: select-method
+      Review the comparison matrix and per-method advantages/limitations before
+      deciding — see search_shortcuts (Comparison matrix; STA/LTA; Template
+      Matching; Deep Learning pickers; Manual picking). For the full table and
+      profiles printed in one place, run `recommend_picker.py show`. Key insight:
+      each method has real strengths and weaknesses; match the method to purpose
+      and resources rather than reaching for a default.
+    depends_on: [gather-requirements]
+
+  - name: recommend-method
     description: >
-      Choose exactly one method based on context, objective, and tradeoffs,
-      cross-checked against `decisions` and the per-method advantages and
-      limitations in `modes`.
+      Turn the requirements into a ranked, explained recommendation. The script
+      gates out non-viable methods using the guide's hard rules (template matching
+      requires template waveforms from a preexisting catalog; deep learning
+      requires continuous data) and scores the rest against the goal's weighting
+      of the four matrix dimensions. Output is decision support, not a verdict.
+    depends_on: [review-tradeoffs]
+    script: scripts/recommend_picker.py
+    inputs:
+      - name: requirements
+        type: object
+    outputs:
+      - name: ranked_recommendation
+        type: object
+        description: >
+          {recommended, ranking:[{method, score, viable, rationale, watch_outs}]}
+          — methods ordered viable-first then by score.
+
+  - name: decide
+    description: >
+      Pick the method. Reason over the full ranking — the top-ranked viable method
+      is the default suggestion, but weigh its watch-outs and your unmodeled
+      constraints (compute budget, analyst time, downstream resolution needs)
+      before committing. Record the choice, the rationale, and the key limitations
+      to watch (e.g. deep-learning out-of-distribution pick errors; STA/LTA false
+      detections during active sequences requiring manual review).
+    depends_on: [recommend-method]
+    inputs:
+      - name: ranked_recommendation
+        type: object
+    outputs:
+      - name: chosen_method
+        type: string
+      - name: rationale
+        type: string
     one_of:
-      - STA/LTA
-      - Template Matching
-      - Deep Learning
-      - Manual
+      - "STA/LTA"
+      - "Manual"
+      - "Deep Learning"
+      - "Template Matching"
 
-decisions:
-  - signal: Need fast, real-time detection of large earthquakes with minimal setup and no prior catalog.
-    action: Use STA/LTA — amplitude-based, fast, easy; accept many false detections and plan manual review.
-  - signal: Preexisting catalog provides good template waveforms; goal is to find the smallest earthquakes similar to known sources or improve temporal resolution of a sequence.
-    action: Use Template Matching — optimally sensitive, few false positives at high threshold; budget for setup and compute.
-  - signal: Temporary broadband or nodal deployment in a sparse or nonexistent network needing an automatically generated, comprehensive local catalog from continuous data.
-    action: Use Deep Learning pickers (e.g., via SeisBench) — low Mc, fewer false detections than STA/LTA, easy setup, reasonable runtime with parallel processing.
-  - signal: Highest-quality, ground-truth picks are required regardless of effort, or a final QC pass is needed over automated picks.
-    action: Use Manual picking — highest sensitivity and generalizability; slow and labor-intensive.
-  - signal: Active earthquake sequence with high event rate where automated catalog completeness matters.
-    action: Prefer Deep Learning over STA/LTA — STA/LTA produces a high rate of false detections during active sequences.
-  - signal: Dataset is out-of-distribution for the deep-learning picker (unusual instrument, region, or noise environment).
-    action: Expect larger automated pick errors (0.1–0.5 s) and missed picks; supplement with manual review, or use template matching where appropriate templates exist.
-  - signal: Spatial resolution matters and unknown earthquake sources dissimilar to any template are expected.
-    action: Do not rely on Template Matching alone — it does not improve spatial resolution; pair with Deep Learning or STA/LTA to find dissimilar sources.
-  - signal: STA/LTA picks are being used as the basis for a quality catalog.
-    action: Plan manual review and refinement of picks — automatic STA/LTA picks are not precise enough on their own.
-
-modes:
-  - name: STA/LTA
-    body: |
-      Short-Term Average / Long-Term Average detector.
-
-      Advantages:
-        - Runs very fast; automatically operates in real-time.
-        - Easy to understand and implement; can optimize for different window
-          lengths and ratios.
-        - No prior knowledge needed; does not require information about
-          earthquake sources or waveforms.
-        - Amplitude-based detector; reliably detects large earthquake signals.
-
-      Limitations:
-        - High rate of false detections during active sequences.
-        - Automatic picks not as precise.
-        - Requires manual review and refinement of picks for a quality catalog.
-
-      Tradeoff profile — Generalizability: High. Sensitivity: Low.
-      Speed/Ease-of-Use: Fast, Easy. False Positives: Many.
-  - name: Template Matching
-    body: |
-      Cross-correlation of continuous data against template waveforms drawn
-      from a preexisting catalog.
-
-      Advantages:
-        - Optimally sensitive detector — more sensitive than deep learning.
-          Can find the smallest earthquakes buried in noise, if similar
-          enough to the template waveform.
-        - Excellent for improving temporal resolution of earthquake sequences.
-        - False detections are not as concerning when using a high detection
-          threshold.
-
-      Limitations:
-        - Requires prior knowledge about earthquake sources — need template
-          waveforms with good picks from a preexisting catalog.
-        - Does not improve spatial resolution; unknown earthquake sources
-          that are not similar enough to templates cannot be found.
-        - Setup effort required — must extract template waveforms and
-          configure processing.
-        - Computationally intensive.
-
-      Tradeoff profile — Generalizability: Low. Sensitivity: High.
-      Speed/Ease-of-Use: Slow, Difficult. False Positives: Few.
-  - name: Deep Learning
-    body: |
-      Pretrained neural-network phase pickers (e.g., available via SeisBench).
-
-      When to use:
-        - Adds most value when existing seismic networks are sparse or
-          nonexistent.
-        - Automatically and rapidly creates a more complete catalog during
-          active sequences.
-        - Requires continuous seismic data.
-        - Best on broadband stations, but also produces usable picks on
-          accelerometers, nodals, and Raspberry Shakes.
-        - Typical use case — temporary deployment of broadband or nodal
-          stations where you want an automatically generated local
-          earthquake catalog.
-
-      Advantages:
-        - No prior knowledge needed about earthquake sources or waveforms.
-        - Finds many small local earthquakes (lower magnitude of
-          completeness, Mc) with fewer false detections than STA/LTA.
-        - Relatively easy to set up and run; reasonable runtime with
-          parallel processing. SeisBench provides easy-to-use model APIs
-          and pretrained models.
-
-      Limitations:
-        - Out-of-distribution data issues — for datasets not represented in
-          training data, expect larger automated pick errors (0.1–0.5 s)
-          and missed picks.
-        - Cannot pick phases completely buried in noise — not quite as
-          sensitive as template matching.
-        - Sometimes misses picks from larger earthquakes that are obvious
-          to humans, for unexplained reasons.
-
-      Tradeoff profile — Generalizability: High. Sensitivity: High.
-      Speed/Ease-of-Use: Fast, Easy. False Positives: Medium.
-  - name: Manual
-    body: |
-      Human analyst review and picking of seismic waveforms. Use as ground
-      truth, for small datasets, or as a final QC pass over automated picks.
-
-      Tradeoff profile — Generalizability: High. Sensitivity: High.
-      Speed/Ease-of-Use: Slow, Difficult. False Positives: Few.
+search_shortcuts:
+  - category: Comparison matrix
+    body: >
+      Tradeoffs across the four methods (the structured source of truth lives in
+      `scripts/recommend_picker.py`; `recommend_picker.py show` prints it).
+      STA/LTA — generalizability High, sensitivity Low, speed/ease Fast & Easy,
+      false positives Many. Manual — generalizability High, sensitivity High,
+      speed/ease Slow & Difficult, false positives Few. Deep Learning —
+      generalizability High, sensitivity High, speed/ease Fast & Easy, false
+      positives Medium. Template Matching — generalizability Low, sensitivity High
+      (optimally sensitive — more than deep learning), speed/ease Slow & Difficult,
+      false positives Few. Definitions: generalizability = ability to find
+      arbitrary earthquake signals; sensitivity = ability to find small
+      earthquakes.
+  - category: STA/LTA (Short-Term Average / Long-Term Average)
+    body: >
+      Advantages: runs very fast and operates automatically in real-time; easy to
+      understand and implement (tune window lengths and the ratio); no prior
+      knowledge of sources or waveforms needed; amplitude-based detector that
+      reliably detects large earthquake signals. Limitations: high rate of false
+      detections during active sequences; automatic picks are not as precise;
+      requires manual review and refinement of picks for a quality catalog.
+  - category: Template Matching
+    body: >
+      Advantages: optimally sensitive detector (more sensitive than deep learning)
+      — can find the smallest earthquakes buried in noise, if similar enough to a
+      template waveform; excellent for improving the temporal resolution of
+      earthquake sequences; false detections are not as concerning when using a
+      high detection threshold. Limitations: requires prior knowledge — template
+      waveforms with good picks from a preexisting catalog; does not improve
+      spatial resolution (sources not similar enough to templates cannot be found);
+      setup effort to extract templates and configure processing; computationally
+      intensive.
+  - category: Deep Learning pickers
+    body: >
+      When to use: adds the most value when existing networks are sparse or
+      nonexistent; to automatically and rapidly build a more complete catalog
+      during active sequences; requires continuous seismic data; best on broadband
+      stations but also produces usable picks on accelerometers, nodals, and
+      Raspberry Shakes. Canonical use case: temporary deployment of broadband or
+      nodal stations where you want an automatically generated local earthquake
+      catalog. Advantages: no prior knowledge of sources/waveforms needed; finds
+      many small local earthquakes (lower magnitude of completeness, Mc) with fewer
+      false detections than STA/LTA; relatively easy to set up and run with
+      reasonable runtime under parallel processing — SeisBench provides easy-to-use
+      model APIs and pretrained models. Limitations: out-of-distribution data →
+      larger automated pick errors (0.1-0.5 s) and missed picks; cannot pick phases
+      completely buried in noise (not quite as sensitive as template matching);
+      sometimes misses picks from larger earthquakes that are obvious to humans.
+  - category: Manual picking
+    body: >
+      The analyst-driven baseline (from the comparison matrix): high
+      generalizability and high sensitivity with few false positives — the
+      highest-quality, most precise picks — but slow and difficult, so it does not
+      scale to large continuous datasets. Use when picks must be as precise as
+      possible and analyst time is available, or to review/refine automatic picks.
+  - category: Recommender script
+    body: >
+      `python scripts/recommend_picker.py show` prints the comparison matrix and
+      full per-method profiles. `python scripts/recommend_picker.py recommend
+      --goal <automatic-catalog|real-time-monitoring|max-sensitivity|highest-precision|balanced>`
+      ranks the methods; add `--no-templates`/`--have-templates`,
+      `--continuous-data`/`--no-continuous-data`, `--sparse-network`,
+      `--find-novel-sources`, `--active-sequence`, per-dimension `--weight-*`
+      overrides, or pass a constraints object via `--requirements-json '{...}'`;
+      `--json` emits machine-readable output. `python scripts/recommend_picker.py
+      --self-test` runs offline deterministic checks (stdlib only).
+  - category: References
+    body: >
+      Derivative of Beauce, Tepp, Yoon, Yu, Zhu, "Building a High Resolution
+      Earthquake Catalog from Raw Waveforms: A Step-by-Step Guide," SSA Annual
+      Meeting 2025 (https://ai4eps.github.io/Earthquake_Catalog_Workshop/). Also:
+      Allen (1978) — STA/LTA; Perol et al. (2018) — deep learning for seismic
+      detection; Huang & Beroza (2015) — template matching; Yoon and Shelly (2024),
+      TSR — deep learning vs template matching comparison.
 
 anti_patterns:
-  - Choosing a method without first inventorying available data, station types, network density, and any preexisting catalog.
-  - Defaulting to STA/LTA during active sequences, where the false-detection rate makes the catalog hard to use without heavy manual cleanup.
-  - Using template matching without a preexisting catalog or representative template waveforms.
-  - Assuming a deep-learning picker trained on broadband data will perform as well on accelerometers, nodals, Raspberry Shakes, or unusual noise environments without checking pick error against a held-out sample.
-  - Relying on Template Matching alone when spatial resolution matters — it cannot find earthquakes whose waveforms are not similar to a template.
-  - Treating automated STA/LTA picks as a finished catalog without manual review and refinement.
+  - Reaching for template matching without a preexisting catalog of good picks to build template waveforms from — it requires that prior knowledge.
+  - Expecting template matching to find earthquakes dissimilar to your templates — it does not improve spatial resolution; unknown sources are missed.
+  - Trusting STA/LTA automatic picks during active sequences without manual review — expect many false detections and imprecise picks.
+  - Treating deep-learning picks as infallible — out-of-distribution data gives larger errors (0.1-0.5 s) and missed picks, it cannot recover phases fully buried in noise, and it occasionally misses picks obvious to a human.
+  - Forgetting deep learning needs continuous seismic data.
+  - Choosing a fast, easy method when the goal demands maximum sensitivity (or an expensive sensitive method when speed/coverage is what matters) — match the method to purpose and resources.
+
+scenarios:
+  - need: Temporary broadband/nodal deployment; want an automatically generated local catalog from continuous data, with no preexisting catalog to seed templates.
+    context: gather-requirements → goal=automatic-catalog, have_templates=false, continuous_data=true; recommend-method gates out template matching (no templates) and ranks Deep Learning top.
+    action: Choose Deep Learning (e.g. a SeisBench pretrained picker); plan manual spot-checks for out-of-distribution stations.
+    outcome: Lower Mc with fewer false detections than STA/LTA and reasonable runtime — a more complete automatic catalog.
+  - need: Tighten the temporal resolution of a known aftershock sequence; a catalog of well-picked events is already available.
+    context: gather-requirements → goal=max-sensitivity, have_templates=true; recommend-method finds template matching viable and ranks it first (optimally sensitive).
+    action: Choose Template Matching with a high detection threshold; extract template waveforms from the existing catalog.
+    outcome: Detects the smallest events buried in noise that match templates, improving temporal resolution of the sequence.
+  - need: Real-time monitoring for large events with minimal setup and no prior source knowledge.
+    context: gather-requirements → goal=real-time-monitoring; recommend-method favors fast methods (STA/LTA, Deep Learning).
+    action: Choose STA/LTA for the real-time amplitude trigger, accepting that picks need later manual review and refinement.
+    outcome: Fast, automatic real-time detection of large signals; quality catalog requires downstream review.
+  - need: Build a small but maximally precise reference catalog and analyst time is available.
+    context: gather-requirements → goal=highest-precision; recommend-method ranks Manual top (few false positives, high sensitivity) despite being slow.
+    action: Choose Manual picking (or use it to review automatic picks) where precision matters more than scale.
+    outcome: The highest-quality picks, at the cost of throughput — not suitable for large continuous datasets.
 ```

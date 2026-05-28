@@ -1,138 +1,156 @@
 ---
 name: video-silence-remover
-description: Compress a teaching video by removing the unnecessary opening (static frames with audio noise) and long silent pauses (typically > 2 s), then emit a compression_report.json with original/compressed/removed durations, compression percentage, and the exact intervals removed. Use when the input is a single teaching/lecture video file (e.g. data/input_video.mp4) and the deliverables required are compressed_video.mp4 plus compression_report.json in the working directory. Pairs ffmpeg's silencedetect and freezedetect filters with a trim+concat filter graph; teaching content between silences is preserved verbatim.
-license: Apache-2.0
-compatibility: Requires ffmpeg and ffprobe on PATH (libx264 + aac encoders) and Python 3.9+. No third-party Python packages needed.
+description: >
+  Remove the unnecessary opening and long silent pauses from a teaching/lecture
+  video, keeping the teaching content, and emit a compression report. Use when
+  asked to "remove silence", "compress a teaching video", "cut pauses/dead air",
+  "trim the opening/intro", or to produce compressed_video.mp4 plus a
+  compression_report.json. Drives ffmpeg silencedetect (audio pauses) and
+  freezedetect (static opening frames), then trims and concatenates the kept
+  segments. Keywords: silence removal, dead-air, pause cutting, lecture
+  compression, ffmpeg, ffprobe.
+compatibility: Requires ffmpeg and ffprobe on PATH, and Python 3.10+. Designed for Claude Code or similar agents.
 metadata:
   aip:
-    spec: https://github.com/zach-blumenfeld/aip/tree/v0.2
-    schemaId: https://raw.githubusercontent.com/zach-blumenfeld/aip/v0.2/assets/aip-schemas/procedure.schema.json
+    spec: https://github.com/zach-blumenfeld/aip/tree/v0.3a2
+    schemaId: https://raw.githubusercontent.com/zach-blumenfeld/aip/v0.3a2/assets/aip-schemas/procedure.schema.json
 ---
 
 ```yaml
 purpose: >
-  Produce a compressed teaching video plus a strictly-formatted JSON report by
-  detecting and removing two kinds of dead time: a static / noisy opening and
-  any silent pause longer than ~2 seconds. The cut must preserve teaching
-  content verbatim, the report must satisfy the schema in the task
-  instruction, and the math must be self-consistent
-  (original ≈ compressed + removed).
+  Compress a teaching video by removing its unnecessary opening (static frames
+  with non-speech noise) and its long pauses (silent dead-air, usually > 2s),
+  while preserving the teaching content. Produce the trimmed video and a JSON
+  compression report whose duration math is internally consistent. The
+  domain insight the agent would otherwise miss: the opening needs VISUAL
+  (freeze) detection while pauses need AUDIO (silence) detection — silence
+  detection alone misses the opening because the opening has noise, not silence.
 
 trigger_when:
-  - A teaching or lecture video must be auto-compressed by removing silence and the opening.
-  - The deliverables are exactly `compressed_video.mp4` and `compression_report.json` in the workspace.
-  - The input is a single MP4 (or similar) on disk, default path `data/input_video.mp4`.
-  - An evaluator will check JSON schema validity, removed-duration plausibility, and `original ≈ compressed + removed` consistency.
+  - Asked to remove silence, dead-air, or long pauses from a video.
+  - Asked to trim/cut an unnecessary opening or intro from a lecture/teaching video.
+  - Asked to produce a compressed_video.mp4 and/or a compression_report.json.
+  - A task supplies a ~10-min teaching video and expects silence-removal + a duration report.
 
 do_not_use_when:
-  - The required output is a transcript, summary, captions, or chaptering — those are different tasks.
-  - The user wants every short breath/pause removed for "jump cut" style editing — this skill targets only pauses ≳ 2 s.
-  - There is no audio track to analyze (audio-driven silence detection won't fire).
+  - The goal is editing for content (re-ordering, captions, effects) rather than removing silence/opening.
+  - The video has no teaching structure and any cut is acceptable — general video trimming needs no special procedure.
 
 scope_and_approval: >
-  Write-only inside the workspace: produces `compressed_video.mp4` and
-  `compression_report.json` (paths overridable via flags) and may write
-  ffmpeg's temp files. Does not modify the input video. No network access
-  required. Re-encodes with libx264 / aac so output is not bit-identical to
-  the source segments — this is expected.
+  Read-only analysis of the input video; writes only the two output files
+  (compressed_video.mp4, compression_report.json) into the working directory.
+  Never overwrites or deletes the source input. The render re-encodes the
+  video; keep ffmpeg presets fast enough that total processing stays well under
+  10 minutes for a ~10-min input. No human approval needed for the standard run;
+  surface the detection plan before rendering if the previewed compression looks
+  implausible.
 
 steps:
-  - name: locate-input
+  - name: detect-segments
     description: >
-      Confirm the input video path. Default to `data/input_video.mp4` unless
-      the user gave another path. Verify it exists with `ls` / `Read`-stat
-      before invoking the script — a missing input is the most common failure
-      mode and the cheapest to catch.
-  - name: verify-tooling
-    description: >
-      Check that `ffmpeg` and `ffprobe` are on PATH (`ffmpeg -version`,
-      `ffprobe -version`). If either is missing, install via the system
-      package manager (`brew install ffmpeg` / `apt-get install -y ffmpeg`)
-      before continuing. The script depends only on stdlib + these binaries.
-  - name: detect-silence
-    description: >
-      Detect long silent pauses with `silencedetect=noise=-30dB:d=2`. -30 dB
-      tolerates room tone but flags real pauses; the 2 s floor matches the
-      "usually > 2 sec" guidance in the instruction. `scripts/process_video.py`
-      handles the parsing, including the case where the file ends in silence
-      and ffmpeg omits a final `silence_end`.
-    depends_on: [locate-input, verify-tooling]
-  - name: detect-opening
-    description: >
-      Detect the static opening with `freezedetect=n=0.003:d=1.0`, but only
-      treat a freeze as "opening" if it starts within ~1 s of t=0. This
-      prevents a still slide later in the lecture from being misclassified.
-      The detected interval `(0, opening_end)` joins the removal list.
-    depends_on: [locate-input, verify-tooling]
-    parallel: true
-  - name: plan-removals
-    description: >
-      Union and merge the silence intervals and the opening interval into a
-      sorted, non-overlapping removal list. Clamp endpoints to the input
-      duration. The complement of this list (intervals to keep) becomes the
-      cut plan.
-    depends_on: [detect-silence, detect-opening]
-  - name: run-processor
-    description: >
-      Run `python scripts/process_video.py --input <video>` from the
-      workspace. The script performs steps `detect-silence`, `detect-opening`,
-      `plan-removals`, executes the ffmpeg `trim`+`atrim`+`concat`
-      filter_complex, and writes both outputs. Defaults already point at
-      `compressed_video.mp4` and `compression_report.json` in the CWD; only
-      pass `--output` / `--report` if the user specified other locations.
-    depends_on: [plan-removals]
-  - name: verify-report
-    description: >
-      Read `compression_report.json` back and check (a) all five top-level
-      keys are present, (b) `segments_removed` items each have `start`,
-      `end`, `duration`, (c) `original_duration_seconds ≈
-      compressed_duration_seconds + removed_duration_seconds` within ~0.2 s
-      tolerance, (d) `compression_percentage` is plausible (typically 5–40 %
-      for a 10-min teaching video; if it is 0 or > 70 %, jump to the
-      `decisions` table).
-    depends_on: [run-processor]
-  - name: verify-video
-    description: >
-      `ffprobe` the output to confirm it is a valid playable mp4 whose
-      duration matches `compressed_duration_seconds` in the report. The
-      script does this automatically (the report's duration is computed from
-      ffprobe of the actual output), but spot-check from the agent side.
-    depends_on: [run-processor]
+      Run scripts/detect_segments.py to probe the input and detect removable
+      segments — the leading static opening (ffmpeg freezedetect) and long
+      silent pauses (ffmpeg silencedetect) — then write a plan with the
+      complementary keep_segments. Defaults target pauses > 2s and a leading
+      freeze within the first 3s.
+    script: scripts/detect_segments.py
+    inputs:
+      - name: input_video
+        type: string
+        description: Path to the source video, e.g. data/input_video.mp4.
+    outputs:
+      - name: analysis
+        type: object
+        description: >
+          analysis.json — original_duration_seconds, has_audio, removal_segments
+          (each with a reason: opening|silence), keep_segments, and a
+          compression_percentage_preview.
 
-decisions:
-  - signal: "ffmpeg / ffprobe not on PATH."
-    action: "Install before running the script. macOS: `brew install ffmpeg`. Debian/Ubuntu: `apt-get install -y ffmpeg`."
-  - signal: "`compression_percentage` is 0 or near-zero but the video clearly contains long pauses."
-    action: "Threshold too low. Re-run with `--silence-db -25dB`, then `-20dB`. See references/tuning.md."
-  - signal: "Compression > 70% — likely cutting teaching content."
-    action: "Threshold too aggressive. Re-run with `--silence-db -35dB` or `-40dB`. Inspect `--verbose` output to confirm."
-  - signal: "Opening is still in the output."
-    action: "Re-run with `--freeze-noise 0.01` (looser) or `--freeze-min 0.5` (shorter). If the opening has motion, rely on silence detection alone — pass `--skip-opening` and bump `--silence-db` higher."
-  - signal: "Script aborts with `No keep segments`."
-    action: "The threshold collapsed the whole video to silence. Reset to defaults; if it still fires, the audio track may be silent — pass `--skip-opening` and `--silence-db -50dB` to keep everything except true digital silence."
-  - signal: "Encode takes longer than ~5 min."
-    action: "Already using `-preset veryfast -crf 23`. If still slow on a long video, the trim+concat graph is the cost — accept it; the 10-min processing budget allows this."
-  - signal: "Report math does not balance (original ≠ compressed + removed)."
-    action: "Do not hand-edit the JSON. Re-run the script; it derives `removed_duration_seconds` from ffprobe of the actual output, so a mismatch means the script did not complete cleanly."
+  - name: review-plan
+    description: >
+      Read analysis.json and sanity-check before rendering. Confirm a removal
+      segment with reason "opening" starts at 0, that pauses > 2s are captured,
+      and that keep_segments still cover the bulk of the runtime (teaching
+      content preserved). A teaching video typically compresses ~5–35%; if the
+      preview is far outside that band or the opening was missed, re-run
+      detect-segments with tuned thresholds — see references/ffmpeg-detection.md
+      for which flag to move and in which direction.
+    depends_on: [detect-segments]
+    inputs:
+      - name: analysis
+        type: object
+    outputs:
+      - name: approved_plan
+        type: object
+        description: The analysis.json the agent judges correct enough to render.
+
+  - name: render-and-report
+    description: >
+      Run scripts/build_output.py to trim+concatenate keep_segments into
+      compressed_video.mp4 (single frame-accurate ffmpeg filter_complex pass,
+      re-encoded) and write compression_report.json. The script computes the
+      report from the plan and runs internal consistency checks, exiting
+      non-zero if the math, segment bounds, or rendered-vs-planned duration are
+      inconsistent.
+    script: scripts/build_output.py
+    depends_on: [review-plan]
+    inputs:
+      - name: input_video
+        type: string
+      - name: approved_plan
+        type: object
+    outputs:
+      - name: compressed_video
+        type: string
+        description: compressed_video.mp4 in the working directory.
+      - name: compression_report
+        type: object
+        description: >
+          compression_report.json — original_duration_seconds,
+          compressed_duration_seconds, removed_duration_seconds,
+          compression_percentage, segments_removed[{start,end,duration}].
+
+  - name: verify
+    description: >
+      Confirm both output files exist in the working directory and that
+      build_output.py exited 0 (its checks already enforce
+      original ≈ compressed + removed, valid segment bounds, and
+      rendered-duration ≈ planned). If it exited non-zero, read the CHECK
+      FAILED lines, adjust thresholds in detect-segments, and repeat from
+      there. The expected output JSON shape is in assets/report_template.json.
+    depends_on: [render-and-report]
+    inputs:
+      - name: compressed_video
+        type: string
+      - name: compression_report
+        type: object
 
 scenarios:
-  - need: "Default invocation against the canonical input path."
-    action: "`python scripts/process_video.py --input data/input_video.mp4` from the workspace root."
-    outcome: "Writes `compressed_video.mp4` and `compression_report.json` to the workspace, ready for evaluation."
-  - need: "Initial run removed ~2% of the video but the lecture has audible long pauses."
-    context: "Silence threshold of -30dB didn't catch ambient room tone hovering around -25dB."
-    action: "Re-run with `--silence-db -22dB`. Confirm with `--verbose` that the new silence intervals match audible pauses."
-    outcome: "compression_percentage rises into a plausible 10–30% band; teaching content unaffected."
-  - need: "Opening is animated (motion graphic) so freezedetect does not fire, but the opening is silent."
-    action: "Pass `--skip-opening`; the silence in the opening audio is captured by `silencedetect` and removed along with the rest."
-    outcome: "Opening removed, no false positives mid-lecture."
+  - need: A 10-min lecture with a 6s static title card (low hum) and three pauses of 3–8s.
+    context: >
+      detect_segments.py reports a freeze [0,6] (reason opening) and three
+      silences ≥ 2s; preview compression ~12%.
+    action: >
+      Review passes (opening at 0, pauses caught, teaching kept). Run
+      build_output.py; checks pass.
+    outcome: >
+      compressed_video.mp4 ~528s and compression_report.json with consistent
+      math (original ≈ compressed + removed) and four segments_removed.
+
+  - need: Opening not removed — only the silent pauses were cut.
+    context: >
+      The title card has light dithering noise so freezedetect at -60dB did not
+      fire; analysis.json has no segment with reason "opening".
+    action: >
+      Per references/ffmpeg-detection.md, re-run with --freeze-noise-db -50
+      (more tolerant). Opening now detected; re-review, then render.
+    outcome: Opening removed; compression back into the expected band.
 
 anti_patterns:
-  - "Hand-editing `compression_report.json` to make the math balance — the script computes `removed_duration_seconds` from ffprobe so any mismatch indicates a real bug, not a rounding issue."
-  - "Using `-c copy` to avoid re-encoding. The ffmpeg `trim`+`concat` filter graph requires decoded frames; `-c copy` will either fail or align cuts to keyframes (sloppy boundaries)."
-  - "Removing every sub-2-second gap. The instruction says pauses are 'usually > 2 sec'; aggressive jump-cutting damages teaching cadence."
-  - "Trusting `silencedetect` alone to catch the opening. A noisy opening can be louder than the silence threshold; that is why `freezedetect` runs in parallel."
-  - "Treating any freeze in the video as 'opening'. The detector intentionally only honors freezes that begin within ~1 s of t=0 so mid-lecture still slides are preserved."
-  - "Skipping the verify-report step. The evaluator checks JSON structure and math consistency — a single missing key fails the task even if the video is perfect."
-  - "Loading `references/tuning.md` on the happy path. Only read it if the report looks off (signals listed under `decisions`)."
+  - Using only silencedetect — it misses the opening, which is noisy (not silent) but visually static.
+  - Treating every freeze as the opening; a mid-lecture freeze during active speech is teaching content and must be kept.
+  - Stream-copying cuts (-c copy) — keyframe snapping makes durations drift and breaks the report math; re-encode with the trim/concat filter graph instead.
+  - Writing compression_report.json by hand and letting the numbers drift from the segments; let build_output.py compute and self-check them.
+  - Hard-coding an expected compression percentage; the true amount is video-specific, so review against a band and tune thresholds instead.
+  - Re-encoding so slowly the run exceeds ~10 min; keep a fast preset for a ~10-min input.
 ```

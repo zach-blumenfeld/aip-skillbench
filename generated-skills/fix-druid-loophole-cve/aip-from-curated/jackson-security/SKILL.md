@@ -1,115 +1,128 @@
 ---
 name: jackson-security
-description: Security considerations for Jackson JSON deserialization in Java applications. Covers timing of validation, raw input interception, and common deserialization attack patterns (empty key, polymorphic type handling, duplicate keys, nested payloads). Use when reviewing or modifying Java code that calls Jackson's readValue, auditing a JSON-accepting endpoint for deserialization safety, or investigating a Jackson-related CVE.
+description: "Security considerations for Jackson JSON deserialization in Java applications: why validation must run on the raw input before readValue() rather than on the resulting object, plus the structural attack patterns Jackson is exposed to — empty-key (\"\") injection, polymorphic @class/@type directives, duplicate-key confusion, and deeply nested variants. Use when securing, patching, or reviewing Java endpoints that deserialize untrusted JSON with Jackson, when fixing a deserialization vulnerability (config override, RCE, gadget chains), or when the user mentions Jackson, readValue, deserialization attacks, or the empty-key bypass."
+compatibility: Concerns Java applications that deserialize untrusted JSON with the Jackson (com.fasterxml.jackson) library.
 metadata:
   aip:
-    spec: https://github.com/zach-blumenfeld/aip/tree/v0.2
-    schemaId: https://raw.githubusercontent.com/zach-blumenfeld/aip/v0.2/assets/aip-schemas/procedure.schema.json
+    spec: https://github.com/zach-blumenfeld/aip/tree/v0.3a2
+    schemaId: https://raw.githubusercontent.com/zach-blumenfeld/aip/v0.3a2/assets/aip-schemas/procedure.schema.json
 ---
 
 ```yaml
 purpose: >
-  Security knowledge for Jackson JSON deserialization in Java applications.
-  Jackson transforms JSON text into Java objects inside a single readValue
-  call — interpreting structure, resolving types, handling special keys, and
-  instantiating objects all in one step. That step is the attack surface, and
-  the resulting Java object retains no trace of how it was built. This skill
-  names the structural attack patterns that survive ordinary
-  post-deserialization validation and how to intercept them on the raw input.
+  Encapsulates how Jackson turns untrusted JSON into Java objects and why that
+  makes input validation a timing problem. Jackson interprets structure,
+  resolves types, handles special keys, and runs configured behavior inside a
+  single readValue() call, so any attack that rides the parse — empty-key
+  injection, polymorphic @class type directives, duplicate keys, nested
+  variants — has already fired by the time your code sees the object and
+  leaves no trace on it. The defense this skill encodes: validate the raw JSON
+  text or bytes before deserialization, never the resulting object.
 
 trigger_when:
-  - Reviewing or modifying Java code that calls Jackson's readValue or otherwise deserializes JSON via Jackson.
-  - Auditing a JSON-accepting endpoint (Spring MVC, JAX-RS, Dropwizard, etc.) for deserialization safety.
-  - Investigating a Jackson-related CVE, advisory, or "loophole" bug.
-  - Designing validation logic for JSON input that will later be parsed by Jackson.
-  - Configuring or reviewing ObjectMapper settings, @JsonTypeInfo annotations, or default typing.
+  - Securing, patching, or reviewing a Java endpoint that deserializes untrusted JSON with Jackson (ObjectMapper.readValue, @RequestBody, framework auto-binding).
+  - A request body can reach readValue() before any application validation runs.
+  - Investigating or fixing a deserialization vulnerability (config override, RCE, gadget chains) in a Jackson-based service.
+  - User mentions Jackson, readValue, deserialization attacks, the empty-key ("") bypass, @class/polymorphic type handling, or duplicate-key confusion.
 
 do_not_use_when:
-  - Working with non-Jackson JSON libraries (Gson, fastjson, org.json) — attack details and defaults differ.
-  - Validating already-constructed POJOs that never originated from external JSON input.
+  - The JSON is trusted/internal and never crosses a security boundary.
+  - The service parses JSON with a non-Jackson library; still validate raw input, but the specific patterns here are Jackson-shaped.
+  - The concern is schema/business validation of otherwise-legitimate data, not deserialization-time attacks.
+
+scope_and_approval: >
+  scripts/scan_raw_json.py is read-only diagnosis — it inspects a payload and
+  reports findings, it changes nothing. Editing source, writing patch files,
+  rebuilding, and deploying are write actions; follow the host task's approval
+  and verification norms for those.
 
 steps:
-  - name: locate-deserialization-boundary
+  - name: understand-deserialization-timing
     description: >
-      Find where untrusted JSON enters Jackson. The relevant lifecycle is:
-      (1) HTTP request arrives with JSON body, (2) framework deserializes
-      JSON → Java object (Jackson runs here), (3) handler receives the Java
-      object, (4) handler validates, (5) handler processes. The attack
-      surface is step 2 — by the time the handler sees the object, any
-      parsing-time effect has already executed.
-  - name: validate-raw-input-before-readvalue
+      Internalize the timing model: Jackson interprets structure, resolves
+      types, handles special keys, and instantiates objects all inside one
+      readValue() call, and the resulting object keeps no trace of how it was
+      built. Read references/jackson-deserialization-attacks.md for the full
+      model before designing any fix.
+  - name: locate-validation-placement
     description: >
-      Inspect the raw JSON string or token stream before calling readValue.
-      Post-deserialization validation examines the result, not the process,
-      and cannot see structural artifacts — empty keys, type directives,
-      duplicate keys — that have already influenced object construction or
-      triggered side effects. This is the fundamental blind spot the skill
-      exists to close.
-  - name: check-empty-key
+      Find every point where untrusted JSON reaches Jackson (readValue,
+      @RequestBody, framework auto-deserialization) and where current
+      validation runs relative to it. Any check that runs on the deserialized
+      object is too late — parse-time attacks have already executed.
+    depends_on: [understand-deserialization-timing]
+    outputs:
+      - name: deserialization-sites
+        type: list[object]
+        description: Locations where untrusted JSON is handed to Jackson, with the surrounding validation (if any).
+  - name: intercept-raw-input
     description: >
-      Detect and handle the empty-string key (""). JSON permits it (RFC 8259)
-      and Jackson parses it without error, but some configurations assign it
-      special meaning — injection points that set values on the root object,
-      property override via @JsonAnySetter or custom deserializers, and
-      framework behaviors that read "" as "apply to parent" or "default
-      target". After readValue completes there is no standard way to tell
-      from the Java object that "" was ever present, so the check must
-      happen on the raw JSON.
-  - name: check-polymorphic-type-handling
+      Capture the raw JSON string or bytes of the request body before it is
+      handed to readValue(). This is the only place the attack structure is
+      still visible.
+    depends_on: [locate-validation-placement]
+    inputs:
+      - name: deserialization-sites
+        type: list[object]
+    outputs:
+      - name: raw-json
+        type: string
+        description: The untrusted request body as received, before any deserialization.
+  - name: scan-raw-input
     description: >
-      If @JsonTypeInfo or ObjectMapper.activateDefaultTyping is enabled,
-      treat type discriminator keys (e.g., "@class", "@type") as
-      code-execution primitives. JSON of the form
-      {"@class": "com.attacker.MaliciousClass", "command": "..."} causes
-      Jackson to attempt instantiation of whatever class is named; if the
-      classpath contains exploitable gadget classes, arbitrary code may
-      execute during deserialization — before any application code runs.
-      Confirm an explicit subtype allowlist (PolymorphicTypeValidator) or
-      disable default typing.
-  - name: check-duplicate-keys
+      Scan the raw input for the structural attack patterns — empty-string
+      keys, @-prefixed type directives, and duplicate keys — walking the full
+      tree to arbitrary depth. Script-backed so detection is exhaustive and
+      consistent rather than an ad-hoc substring check.
+    script: scripts/scan_raw_json.py
+    depends_on: [intercept-raw-input]
+    inputs:
+      - name: raw-json
+        type: string
+    outputs:
+      - name: findings
+        type: list[object]
+        description: Each detected pattern with its type, severity, JSON path, and depth.
+      - name: is_malicious
+        type: boolean
+        description: True if any high-severity pattern was found.
+  - name: reject-before-deserializing
     description: >
-      Jackson's default behavior on duplicate keys is last-value-wins. For
-      {"role": "user", "role": "admin"} Jackson yields role = "admin". If
-      an upstream WAF, input filter, or validator inspects only the first
-      occurrence, the validator and Jackson observe different values and the
-      validation can be bypassed. Either reject duplicate keys at the raw
-      layer or ensure the validator uses identical semantics.
-  - name: check-nested-payloads
-    description: >
-      Structural checks for empty keys, type directives, and duplicate keys
-      must walk the entire JSON tree. Deeply nested structures can bury
-      payloads (e.g., config.settings.internal."": "payload") past
-      depth-limited string scans. Recurse fully, or parse into a JsonNode
-      and traverse, before allowing Jackson to deserialize into the target
-      type.
-
-decisions:
-  - signal: Code validates the deserialized Java object but never inspects the raw JSON.
-    action: Add a pre-deserialization pass over the JSON tree (JsonNode traversal or a streaming token check) that rejects disallowed structural patterns before readValue is called against the target type.
-  - signal: "@JsonTypeInfo, @JsonSubTypes, or ObjectMapper.activateDefaultTyping is in use."
-    action: Confirm an explicit PolymorphicTypeValidator allowlist is configured. Treat any "@class"/"@type" key from untrusted JSON as untrusted class instantiation and verify the allowlist denies attacker-controlled class names.
-  - signal: Untrusted JSON contains an empty-string key ("").
-    action: Reject the request, or at minimum log and route through a configuration that has no special handling for "". Do not assume the resulting Java object reflects the empty key's effect — it usually will not.
-  - signal: Duplicate keys observed in untrusted JSON.
-    action: Reject the request or normalize the JSON before validation so the validator and Jackson agree on which value wins. Do not trust a validator that parses with first-wins semantics if Jackson uses last-wins.
-  - signal: Existing validation uses a simple top-level string check or regex on the body.
-    action: Replace with a recursive JsonNode walk. Surface-level checks miss nested injection (e.g., {"config":{"settings":{"internal":{"":"payload"}}}}).
+      If the scan flags any high-severity pattern, reject the request before
+      calling readValue() (throw, return 4xx, or filter). For a production fix,
+      port scan_raw_json.py's checks into the target application's language as a
+      guard that runs on the raw body ahead of deserialization — do not rely on
+      validating the object afterward. Keep the guard precise so legitimate
+      payloads (no empty key, no type directive, no duplicates) still pass.
+    depends_on: [scan-raw-input]
+    inputs:
+      - name: findings
+        type: list[object]
+      - name: is_malicious
+        type: boolean
 
 scenarios:
-  - need: Endpoint accepts a JSON config body and validates the resulting POJO with bean-validation annotations.
-    context: Post-deserialization validation only sees the populated Java object; the original raw JSON has been discarded by the framework before the handler runs.
-    action: Insert a pre-readValue step that parses to JsonNode and rejects empty keys, type discriminators, and duplicate keys anywhere in the tree.
-    outcome: Structural attacks (empty-key injection, polymorphic instantiation, last-wins bypass) are blocked before Jackson constructs the target object.
-  - need: Service uses ObjectMapper.activateDefaultTyping for convenience in serializing polymorphic value classes.
-    context: Default typing instructs Jackson to honor "@class" hints from incoming JSON.
-    action: Disable default typing or configure a PolymorphicTypeValidator allowlist restricted to known safe subtypes; add the raw-input pre-check for "@class"/"@type" keys.
-    outcome: Attacker-controlled class names can no longer trigger gadget-class instantiation during readValue.
+  - need: 'A request body carries an empty-string key alongside normal fields, e.g. {"name":"test","":{"enabled":true}}.'
+    context: The empty key is valid JSON (RFC 8259) and Jackson parses it without error; after deserialization the object looks normal and gives no sign "" was present.
+    action: Scan the raw body before readValue — scan-raw-input flags the empty-key pattern even when nested — and reject.
+    outcome: The injection that would have overridden a server-controlled value is blocked before deserialization runs.
+  - need: 'A polymorphic payload names its own class, e.g. {"@class":"com.attacker.MaliciousClass","command":"..."}.'
+    context: With @JsonTypeInfo enabled, Jackson tries to instantiate the named class; a gadget on the classpath can execute code during deserialization, before your code runs.
+    action: scan-raw-input flags the @class type directive on the raw input; reject before readValue.
+    outcome: Gadget instantiation never happens because the request is rejected pre-parse.
+  - need: 'A payload repeats a key, e.g. {"role":"user","role":"admin"}.'
+    context: Jackson keeps the last value ("admin") while an upstream WAF that checked the first occurrence sees "user" — validation and processing disagree.
+    action: scan-raw-input inspects the raw key/value pairs rather than a normalized object, so it sees the duplicate and flags it.
+    outcome: The validation/processing mismatch is caught instead of silently trusting the first occurrence.
+  - need: An attack pattern is buried deep, e.g. an empty key under config.settings.internal.
+    context: Depth-limited or top-level-only string checks miss patterns hidden in nested structures.
+    action: scan-raw-input walks the entire tree to arbitrary depth and reports the JSON path and depth of each finding.
+    outcome: Nested injection is detected where a shallow check would have passed it through.
 
 anti_patterns:
-  - Treating Jackson deserialization as a transparent data copy. It is an interpretation step with its own attack surface, executed before any handler code runs.
-  - Relying on post-deserialization object validation to catch structural attacks. By the time bean-validation runs, the parsing-time effect has already occurred.
-  - Assuming JSON Schema or bean-validation annotations on the POJO would have observed an empty key or a duplicate key. They do not — the Java object retains no trace of those structural artifacts.
-  - Checking only the top level of the JSON tree for disallowed patterns. Nested injection survives shallow scans.
-  - Leaving default typing or @JsonTypeInfo enabled without an explicit PolymorphicTypeValidator allowlist.
-  - Assuming a WAF or upstream validator that parses JSON with different semantics (first-wins on duplicate keys, no handling of empty keys) agrees with Jackson on what the payload means.
+  - Validating the deserialized Java object instead of the raw input — parse-time attacks have already fired and leave no trace on the object.
+  - Assuming the resulting object reveals whether an empty key was used; whether and where "" lands depends on Jackson configuration and is not observable from the object.
+  - Top-level-only or depth-limited string checks — nested empty keys and type directives slip past them.
+  - Trusting a normalizing JSON parser to surface duplicate keys; it collapses them to one value while Jackson keeps the last.
+  - Treating "" or @class as harmless because the JSON is well-formed — RFC validity is not safety.
 ```

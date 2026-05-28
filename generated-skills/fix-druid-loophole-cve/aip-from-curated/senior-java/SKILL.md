@@ -1,335 +1,359 @@
 ---
 name: senior-java
-description: World-class Java and Spring Boot development skill for enterprise applications, microservices, and cloud-native systems. Expertise in Spring Framework, Spring Boot 3.x, Spring Cloud, JPA/Hibernate, and reactive programming with WebFlux. Use when starting new Spring Boot projects, scaffolding REST APIs, designing JPA data layers, configuring Spring Security (OAuth2/JWT/RBAC), analyzing Maven/Gradle dependencies, profiling JVM performance, or reviewing Java code quality.
-license: MIT
-compatibility: Requires Python 3.8+ to run the bundled scaffolding scripts. Targets Java 17/21 LTS with Spring Boot 3.x, Spring Framework 6.x, Spring Cloud, Spring Security, Spring Data JPA, Hibernate, Maven/Gradle, JUnit 5, Mockito, Docker, Kubernetes. Cross-platform (macOS, Linux, Windows).
+description: >-
+  Enterprise Java and Spring Boot development toolkit for building, securing, and
+  tuning production applications, microservices, and cloud-native systems. Six
+  runnable generators (Spring Boot project scaffolder, JPA entity stack, REST
+  endpoints, Spring Security config, Maven/Gradle dependency vulnerability
+  analyzer, JVM/JPA performance profiler) plus reference guides for Spring Boot
+  3.x, Spring Cloud microservices, JPA/Hibernate, Spring Security, and JVM
+  performance. Use when starting a Spring Boot project or microservice;
+  implementing JPA/Hibernate data layers; designing REST APIs (Spring MVC or
+  WebFlux); setting up JWT/OAuth2 authentication, RBAC, or method security;
+  auditing Maven/Gradle dependencies for CVEs and outdated versions; profiling
+  JVM/query performance; or reviewing Java code for enterprise patterns. Targets
+  Java 17/21, Spring Boot 3.x, Spring Framework 6.x, Spring Cloud, Spring Data
+  JPA, Hibernate, Maven/Gradle.
+compatibility: >-
+  Skill scripts are pure Python 3.8+ (standard library only, no external
+  dependencies) and run on macOS, Linux, and Windows. Generated code targets
+  Java 17/21 LTS, Spring Boot 3.x, and Maven (the scaffolder emits pom.xml).
 metadata:
   aip:
-    spec: https://github.com/zach-blumenfeld/aip/tree/v0.2
-    schemaId: https://raw.githubusercontent.com/zach-blumenfeld/aip/v0.2/assets/aip-schemas/procedure.schema.json
-  domain: engineering
-  subdomain: java-development
-  difficulty: advanced
-  version: v1.0.0
+    spec: https://github.com/zach-blumenfeld/aip/tree/v0.3a2
+    schemaId: https://raw.githubusercontent.com/zach-blumenfeld/aip/v0.3a2/assets/aip-schemas/procedure.schema.json
   author: Claude Skills Team
-  created: "2025-12-16"
-  updated: "2025-12-16"
-  time-saved: "60%+ on project scaffolding, 40% on security implementation"
-  frequency: Daily for enterprise development teams
-  related-agents: cs-java-engineer
-  related-skills: senior-backend, senior-architect
-  orchestrated-by: cs-java-engineer
-  tags: java, spring-boot, spring-framework, microservices, jpa, hibernate, spring-cloud, webflux, enterprise, cloud-native, maven, gradle, api, backend
-  verified: "true"
-  featured: "false"
+  version: v1.0.0
+license: MIT
 ---
 
 ```yaml
 purpose: >
-  Production-ready Java and Spring Boot development for enterprise applications,
-  microservices, and cloud-native systems. Generates scaffolded projects, JPA
-  entity stacks, REST endpoints, and Spring Security configurations using six
-  bundled Python tools, backed by reference documentation on Spring Boot
-  patterns, microservices, JPA/Hibernate, security, and JVM performance. Core
-  value: save 60%+ time on project scaffolding while enforcing enterprise-grade
-  architecture, security compliance, and performance optimization.
+  Production-grade Java/Spring Boot development capability, organized as a
+  toolkit of six runnable generators/analyzers plus five reference guides. It
+  covers the full lifecycle: scaffold a Spring Boot 3.x project (layered
+  architecture, profiles, Docker, CI/CD), generate JPA entity stacks and REST
+  endpoints, wire Spring Security (JWT/OAuth2/RBAC/method security), audit
+  Maven/Gradle dependencies for known CVEs and outdated versions, and profile
+  JVM/JPA performance for N+1 queries and tuning. Beyond general agent
+  knowledge it adds the runnable generators (so boilerplate is consistent and
+  correct rather than hand-written each time), a dependency vulnerability table
+  with severity-coded exit codes, a static query-performance scanner, and
+  reference guides that encode the Spring Boot / JPA / Security / microservices
+  / performance patterns and pitfalls. Apply it by classifying the development
+  need, running the matching generator or analyzer, then hardening the result
+  against the relevant reference's best practices and quality bars.
 
 trigger_when:
-  - Starting a new Spring Boot project or microservice.
-  - User asks to scaffold a Spring Boot application, REST API, or JPA data layer.
-  - Designing RESTful endpoints with Spring MVC or WebFlux.
-  - Implementing JPA/Hibernate persistence and needing query/fetch optimization.
-  - Setting up authentication and authorization (OAuth2, JWT, RBAC, method security).
-  - Analyzing Maven/Gradle dependencies for vulnerabilities or upgrade paths.
-  - Profiling JVM applications or diagnosing performance bottlenecks (N+1, GC, thread pools).
-  - Reviewing Java code for enterprise quality patterns and best practices.
+  - Starting a new Spring Boot project or microservice (monolith, microservice, or reactive WebFlux).
+  - Implementing a JPA/Hibernate data layer — entities, repositories, services, DTOs, mappers.
+  - Designing REST APIs with Spring MVC or WebFlux (CRUD endpoints, validation, pagination, OpenAPI docs, RFC 7807 error handling).
+  - Setting up authentication/authorization — JWT, OAuth2 resource server, role-based access control, @PreAuthorize/@PostAuthorize method security.
+  - Auditing Maven (pom.xml) or Gradle (build.gradle) dependencies for known CVEs, outdated versions, or upgrade paths.
+  - Profiling JVM applications or JPA query performance (N+1 detection, fetch strategy, GC/heap/connection-pool tuning).
+  - Reviewing or hardening Java/Spring code for enterprise patterns, security checklist items, and performance anti-patterns.
+  - User mentions Spring Boot, Spring Cloud, JPA, Hibernate, Spring Security, JWT, OAuth2, microservices, WebFlux, Maven, or Gradle.
 
 do_not_use_when:
-  - Working in a non-Spring Java stack (e.g., plain Jakarta EE, Quarkus, Micronaut)
-    where Spring conventions do not apply.
-  - The task is a one-off Java snippet, scripting, or pure algorithmic question
-    that does not benefit from project-level scaffolding.
-  - Frontend or non-JVM language work — defer to senior-frontend or other skills.
+  - The work is not Java/JVM — these generators emit Java + Spring Boot 3.x + Maven and the references are Spring-specific.
+  - You need a non-Spring Java framework (Quarkus, Micronaut, Jakarta EE without Spring); the patterns and generated code assume Spring.
+  - The task is a one-off script or algorithm with no project/web/data-layer/security/perf dimension.
 
 scope_and_approval: >
-  The bundled scripts under scripts/ generate files and project trees on disk.
-  Treat any scaffolder, generator, or config-writer invocation as a write action:
-  confirm the target directory, project name, and overwrite behavior with the
-  user before running. Dependency analysis and performance profiling are
-  read-only and may be run without explicit approval. Never commit generated
-  output, modify CI/CD pipelines, or push container images without confirmation.
+  The generators write files to disk: spring_project_scaffolder.py creates a new
+  project directory tree, entity_generator.py and security_config_generator.py
+  (with --output) write package files, api_endpoint_generator.py writes a
+  controller (or prints to stdout without --output). Run them into a fresh or
+  intended output directory and review the generated code before integrating it
+  into an existing repository — they scaffold opinionated defaults, not a
+  finished feature. dependency_analyzer.py and performance_profiler.py are
+  read-only: they parse/scan and report, changing nothing, and signal severity
+  through exit codes (2 = critical, 1 = high). Editing existing source files,
+  running Maven/Gradle builds, and deploying artifacts are write actions —
+  follow the host task's approval and verification norms for those.
 
 steps:
-  - name: classify-task
+  - name: classify-need
     description: >
-      Identify which workflow applies — new project scaffolding, REST API
-      development, JPA/Hibernate optimization, Spring Security implementation,
-      dependency analysis, or performance profiling. Pick exactly one primary
-      workflow; multiple may chain sequentially.
-    one_of:
-      - new-spring-boot-microservice
-      - rest-api-development
-      - jpa-hibernate-optimization
-      - spring-security-implementation
-      - dependency-analysis
-      - performance-profiling
-  - name: gather-inputs
+      Determine which capabilities the task requires — most tasks use a subset,
+      not all. Map the need to one or more of: new project (scaffold), data
+      layer (entity stack), API surface (REST endpoints), auth (security
+      config), dependency hygiene (vulnerability audit), or performance
+      (profiler). Capture the constraints the generators take as flags: project
+      type (microservice/monolith/reactive), database
+      (postgresql/mysql/mongodb/h2), Java version (17/21), auth method
+      (jwt/oauth2/basic), base package, and build tool. Treat the remaining
+      generation/analysis steps as options invoked as the need calls for them,
+      not a mandatory pipeline.
+    outputs:
+      - name: need-spec
+        type: object
+        description: The required capabilities plus project-type / database / java-version / security / package constraints.
+  - name: scaffold-project
     description: >
-      Collect inputs the chosen workflow needs — service name, project type
-      (microservice / monolith / reactive), database (PostgreSQL / MySQL /
-      MongoDB / H2), security method (JWT / OAuth2), entity fields and
-      relationships, endpoint methods, role list, or profiling target. Ask the
-      user for anything not derivable from context.
-    depends_on: [classify-task]
-  - name: consult-references
+      Generate a production-ready Spring Boot 3.x project skeleton when the need
+      is a new service. Emits Maven pom.xml, profile-based application.yml
+      (dev/prod), main class, OpenAPI config, exception handling
+      (ResourceNotFoundException + ErrorResponse + GlobalExceptionHandler),
+      optional security scaffolding, Dockerfile, docker-compose.yml, and a
+      GitHub Actions CI/CD workflow. Layered package layout
+      (config/controller/service/repository/entity/dto/mapper/exception).
+    script: scripts/spring_project_scaffolder.py
+    depends_on: [classify-need]
+    inputs:
+      - name: need-spec
+        type: object
+    outputs:
+      - name: project-path
+        type: string
+        description: Root directory of the generated project.
+  - name: generate-entity-stack
     description: >
-      Load only the reference doc(s) relevant to the chosen workflow from
-      references/ — Spring Boot patterns, microservices, JPA/Hibernate,
-      security, or performance tuning. Do not preload all references; progressive
-      disclosure keeps context lean.
-    depends_on: [classify-task]
-  - name: run-generator
+      Generate a complete JPA entity stack from a field/relation spec: entity
+      (Lombok, optional audit fields and soft-delete), Spring Data repository
+      (JpaRepository + JpaSpecificationExecutor), transactional service, REST
+      controller with OpenAPI + validation, DTO with Jakarta validation, and a
+      MapStruct mapper. Field syntax is name:Type[:modifiers] (e.g.
+      id:Long,email:String:unique); relations are field:RelationType
+      (ManyToOne/OneToMany/ManyToMany/OneToOne).
+    script: scripts/entity_generator.py
+    depends_on: [classify-need]
+    inputs:
+      - name: need-spec
+        type: object
+    outputs:
+      - name: entity-files
+        type: list[string]
+        description: Generated entity/repository/service/controller/dto/mapper file paths.
+  - name: generate-rest-endpoints
     description: >
-      Invoke the appropriate Python tool under scripts/ with the gathered
-      inputs (e.g., spring_project_scaffolder.py, entity_generator.py,
-      api_endpoint_generator.py, security_config_generator.py,
-      dependency_analyzer.py, performance_profiler.py). Surface the exact
-      command for user approval before executing if it writes files.
-    depends_on: [gather-inputs, consult-references]
-  - name: customize-and-validate
+      Scaffold a standalone REST controller for a resource when you need the API
+      surface without the full entity stack. Choose HTTP methods
+      (GET,POST,PUT,PATCH,DELETE) and optionally --paginated; emits OpenAPI
+      @Operation annotations, @Valid request bodies, and Page/Pageable wiring.
+      Prints to stdout unless --output is given.
+    script: scripts/api_endpoint_generator.py
+    depends_on: [classify-need]
+    inputs:
+      - name: need-spec
+        type: object
+    outputs:
+      - name: controller-code
+        type: string
+  - name: generate-security-config
     description: >
-      Review generated output, customize application.yml profiles, business
-      logic, validation rules, and security policies. Run unit and integration
-      tests (./mvnw test, ./mvnw verify). Verify quality bars — code coverage
-      80%+ on business logic, zero critical/high vulnerabilities, P99 < 200ms
-      for CRUD operations.
-    depends_on: [run-generator]
-  - name: integrate-and-handoff
+      Generate Spring Security configuration for the chosen auth method. --type
+      jwt emits a Role enum, SecurityConfig (stateless, CORS, CSRF disabled for
+      APIs), JwtAuthenticationEntryPoint, AuthController, and auth DTOs; --type
+      oauth2 (with --issuer-uri) emits a resource-server SecurityConfig and the
+      application-security.yml. Method security (@EnableMethodSecurity) is
+      enabled so @PreAuthorize/@PostAuthorize work.
+    script: scripts/security_config_generator.py
+    depends_on: [classify-need]
+    inputs:
+      - name: need-spec
+        type: object
+    outputs:
+      - name: security-files
+        type: list[string]
+  - name: audit-dependencies
     description: >
-      Connect to downstream concerns — Docker build, CI/CD pipeline, service
-      discovery, distributed tracing, OpenAPI publication. Hand off generated
-      artifacts to senior-devops (deployment), senior-qa (test automation), or
-      technical-writer (API docs) as appropriate.
-    depends_on: [customize-and-validate]
-
-modes:
-  - name: new-spring-boot-microservice
-    body: |
-      Target time: 30–45 minutes.
-      1. Scaffold project — `python scripts/spring_project_scaffolder.py <name> --type microservice --db postgresql --security jwt`
-         produces Spring Boot 3.x project with layered architecture, Docker, CI/CD.
-      2. Configure environment — edit `src/main/resources/application.yml` with
-         profiles for dev/staging/prod; configure DB, security, service discovery.
-      3. Generate entities — `python scripts/entity_generator.py <Entity> --fields "..."` for each
-         domain model, with `--relations` and `--auditable` as needed.
-      4. Implement business logic — add service-layer logic and validation.
-      5. Add tests — `./mvnw test` (unit), `./mvnw verify` (integration).
-      6. Build and deploy — `./mvnw clean package -DskipTests` then `docker build -t <name>:latest .`.
-      Reference: references/spring-boot-best-practices.md for complete setup patterns.
-  - name: rest-api-development
-    body: |
-      Target time: 20–30 minutes per endpoint group.
-      1. Design API contract — `python scripts/api_endpoint_generator.py <resource> --methods GET,POST,PUT,DELETE --paginated`.
-      2. Implement validation — Jakarta validation annotations and custom validators.
-      3. Configure error handling — global exception handler emitting RFC 7807 problem details.
-      4. Add OpenAPI docs — SpringDoc for automatic API documentation (100% endpoint coverage).
-      5. Test endpoints — integration tests with MockMvc (servlet) or WebTestClient (reactive).
-      Reference: references/spring-boot-best-practices.md for API design patterns.
-  - name: jpa-hibernate-optimization
-    body: |
-      Target time: 1–2 hours for complex data models.
-      1. Analyze queries — `python scripts/performance_profiler.py --analyze-queries src/` to detect N+1.
-      2. Optimize fetch strategies — configure lazy/eager loading deliberately.
-      3. Add query hints — entity graphs and query hints for complex joins.
-      4. Configure caching — Hibernate second-level cache with Hazelcast or Redis.
-      5. Implement pagination — Spring Data Slice or Page for large datasets.
-      Reference: references/jpa-hibernate-guide.md for optimization patterns.
-  - name: spring-security-implementation
-    body: |
-      Target time: 1–2 hours.
-      1. Generate config — `python scripts/security_config_generator.py --type jwt --roles ADMIN,USER,MANAGER`
-         or `--type oauth2 --issuer-uri https://auth.example.com`.
-      2. Configure OAuth2/JWT — token generation, validation, refresh.
-      3. Implement RBAC — role-based access control on endpoints.
-      4. Add method security — `@PreAuthorize` / `@PostAuthorize` annotations.
-      5. Test security — security integration tests.
-      Reference: references/spring-security-reference.md for security patterns.
-  - name: dependency-analysis
-    body: |
-      Read-only.
-      - `python scripts/dependency_analyzer.py pom.xml --check-security` — Maven, security focus.
-      - `python scripts/dependency_analyzer.py build.gradle --output report.md` — Gradle, markdown report.
-      Surfaces vulnerabilities, outdated deps, upgrade paths, dependency tree, license compliance.
-  - name: performance-profiling
-    body: |
-      Read-only.
-      - `python scripts/performance_profiler.py --analyze-queries src/` — static analysis for N+1 and patterns.
-      - `python scripts/performance_profiler.py --profile http://localhost:8080/actuator` — profile a running app.
-      - `python scripts/performance_profiler.py src/ --output performance-report.md` — generate optimization report.
-      Reference: references/java-performance-tuning.md for JVM and GC tuning.
-
-decisions:
-  - signal: User asks for a new Spring Boot project but has not specified type.
-    action: >
-      Ask whether they want microservice (Spring Cloud-ready), monolith (layered
-      single-deploy), or reactive (WebFlux + non-blocking). Default to
-      microservice if building a new service in a distributed system.
-  - signal: User chose microservice but did not specify a database.
-    action: >
-      Default to PostgreSQL unless the use case is document-heavy (suggest
-      MongoDB) or local-only (suggest H2). Confirm before scaffolding.
-  - signal: Existing JPA code exhibits N+1 query patterns.
-    action: >
-      Recommend entity graphs or `JOIN FETCH` queries; do not blanket-switch
-      lazy to eager. Run `performance_profiler.py --analyze-queries` to confirm
-      scope before changing fetch types.
-  - signal: User asks for security but has not stated auth method.
-    action: >
-      Ask JWT vs OAuth2 vs SAML. JWT is the default for stateless microservices;
-      OAuth2 resource server when integrating with an existing identity provider.
-  - signal: Dependency analyzer reports critical/high CVEs.
-    action: >
-      Surface every critical/high finding, propose minimum-version upgrades,
-      and recommend running the test suite after upgrade. Do not auto-upgrade
-      without explicit user approval.
-  - signal: User is on Java < 17.
-    action: >
-      Recommend upgrading to Java 17 or 21 LTS before scaffolding — Spring Boot
-      3.x requires Java 17 minimum. Surface the upgrade as a prerequisite.
-  - signal: Reactive (WebFlux) project requested but team has no reactive experience.
-    action: >
-      Flag the operational and debugging complexity of reactive pipelines.
-      Recommend MVC + virtual threads (Java 21) as an alternative for most
-      throughput-bound use cases.
+      Scan a Maven pom.xml or Gradle build.gradle for known-vulnerable
+      dependencies (e.g. log4j-core CVE-2021-44228, jackson-databind
+      CVE-2019-12086, spring-core CVE-2022-22965) and outdated versions, with
+      upgrade recommendations. Read-only; exits 2 if any CRITICAL vuln is found,
+      1 if any HIGH — treat a non-zero exit as a gate, not advisory. This is the
+      runnable form of the "dependencies scanned for vulnerabilities" security
+      checklist item. Caveat: it matches against a small static CVE table and
+      only counts dependencies it can parse (the file must be named pom.xml /
+      build.gradle, and it under-counts namespaced Maven POMs — including the
+      ones spring_project_scaffolder.py emits — reporting 0 deps), so a clean
+      run is necessary but NOT sufficient. A non-zero exit is authoritative;
+      exit 0 is not proof of zero CVEs — corroborate critical dependencies
+      against an authoritative source (OSV/NVD).
+    script: scripts/dependency_analyzer.py
+    depends_on: [classify-need]
+    inputs:
+      - name: need-spec
+        type: object
+    outputs:
+      - name: vuln-report
+        type: object
+        description: Dependencies, vulnerabilities (count/critical/high/issues), and available updates; markdown or JSON.
+  - name: profile-performance
+    description: >
+      Statically scan a Java source directory (--analyze-queries DIR) for
+      JPA/query performance issues — potential N+1 from collection relationships,
+      EAGER fetch, repositories missing @EntityGraph, unbounded findAll() without
+      Pageable, and finder methods that imply needed indexes — and emit JVM
+      tuning recommendations (heap, G1GC, tiered compilation, GC logging,
+      HikariCP). Read-only; exits 2 on critical, 1 on high. (The shipped script
+      supports --analyze-queries; it does not implement a live --profile mode.)
+      The scan is heuristic and pattern-based — read the flagged files to
+      confirm, and note it may surface an N+1 risk indirectly (e.g. as an
+      EAGER_FETCH or UNBOUNDED_QUERY finding rather than a POTENTIAL_N1_QUERY).
+    script: scripts/performance_profiler.py
+    depends_on: [classify-need]
+    inputs:
+      - name: need-spec
+        type: object
+    outputs:
+      - name: perf-report
+        type: object
+        description: Issues by severity, database/index recommendations, and JVM optimization recommendations.
+  - name: harden-and-apply-best-practices
+    description: >
+      Generated code is an opinionated starting point, not a finished feature —
+      harden it against the relevant reference before shipping. Externalize
+      config with profiles and ${VAR:default} (never hardcode secrets); validate
+      every controller input with Jakarta annotations; return RFC 7807 problem
+      details via a global handler; put @Transactional on write service methods
+      and keep queries readOnly; prefer LAZY fetch with @EntityGraph/fetch joins
+      over EAGER; paginate unbounded queries; disable open-in-view in production;
+      never block inside a WebFlux reactive pipeline. Load the matching reference
+      (see search_shortcuts) for the concrete patterns.
+    depends_on: [scaffold-project, generate-entity-stack, generate-rest-endpoints, generate-security-config]
+    inputs:
+      - name: project-path
+        type: string
+        nullable: true
+  - name: verify-quality
+    description: >
+      Check the result against the skill's quality bars before declaring done:
+      80%+ test coverage on business logic (60%+ overall), 100% OpenAPI coverage
+      of public endpoints, zero critical/high dependency vulnerabilities, and a
+      P99 latency target under ~200ms for CRUD. Re-run audit-dependencies until
+      it exits 0 (no critical/high), and re-run profile-performance after fetch
+      changes to confirm the N+1/unbounded-query findings are resolved. The
+      coverage and latency numbers are targets to design toward, not values this
+      skill computes.
+    depends_on: [harden-and-apply-best-practices, audit-dependencies, profile-performance]
 
 search_shortcuts:
-  - category: Bundled Python Tools (scripts/)
-    body: |
-      - `spring_project_scaffolder.py` — Spring Boot 3.x project trees with layered
-        architecture, Docker, CI/CD. Args: `--type microservice|monolith|reactive`,
-        `--db postgresql|mysql|mongodb|h2`, `--security jwt|oauth2`. Lombok + MapStruct.
-      - `entity_generator.py` — full entity stack: JPA entity, Spring Data repository,
-        service layer, REST controller, DTO, MapStruct mapper. Args: `--fields "name:Type,..."`,
-        `--relations "field:OneToMany,..."`, `--auditable`.
-      - `api_endpoint_generator.py` — REST endpoints with validation, OpenAPI annotations,
-        pagination, error handling. Args: `--methods GET,POST,PUT,DELETE`, `--paginated`.
-      - `security_config_generator.py` — Spring Security config (filter chain, CORS, CSRF,
-        method security). Args: `--type jwt|oauth2`, `--roles ROLE1,ROLE2`, `--issuer-uri ...`.
-      - `dependency_analyzer.py` — Maven/Gradle vulnerability scan, outdated detection,
-        upgrade paths, license compliance. Args: `pom.xml|build.gradle`,
-        `--check-security`, `--output report.md`.
-      - `performance_profiler.py` — N+1 detection, memory/GC analysis, thread/connection
-        pool recommendations, JVM flag guidance. Args: `--analyze-queries <src>`,
-        `--profile <actuator-url>`, `--output <report>`.
-      Run any tool with `--help` for full flag listing.
-  - category: Reference Documentation (references/)
-    body: |
-      Load on demand — progressive disclosure keeps context lean.
-      - `spring-boot-best-practices.md` — project structure, layered architecture,
-        config profiles, API design, error handling, testing strategy, actuator,
-        production readiness.
-      - `microservices-patterns.md` — service decomposition, Spring Cloud
-        (Config, Gateway, Discovery), inter-service comms (REST/gRPC/messaging),
-        distributed tracing, circuit breakers, resilience.
-      - `jpa-hibernate-guide.md` — entity design, repository patterns, custom queries,
-        fetch optimization, N+1 prevention, first/second-level caching, transactions.
-      - `spring-security-reference.md` — JWT/OAuth2/SAML, RBAC/ABAC, filter chain,
-        method security annotations, security testing.
-      - `java-performance-tuning.md` — JVM tuning, GC, connection pools, caching,
-        async + virtual threads, profiling tools.
-  - category: External Documentation
-    body: |
-      - Spring Boot Reference: https://docs.spring.io/spring-boot/docs/current/reference/html/
-      - Domain CLAUDE.md: `../CLAUDE.md` (parent skill domain guide)
+  - category: Capability tools (scripts/)
+    body: >
+      spring_project_scaffolder.py NAME --type {microservice|monolith|reactive}
+      --db {postgresql|mysql|mongodb|h2} [--security {jwt|oauth2|basic}] [--java
+      {17|21}] [--group-id ...] [--output DIR] [--no-docker] [--no-ci] [--json]
+      — full project skeleton. entity_generator.py NAME --fields
+      "name:Type[:modifiers],..." [--relations "field:RelType,..."] [--package
+      ...] [--auditable] [--soft-delete] [--output DIR] [--json] — entity +
+      repository + service + controller + DTO + MapStruct mapper.
+      api_endpoint_generator.py RESOURCE [--methods GET,POST,PUT,PATCH,DELETE]
+      [--paginated] [--package ...] [--output FILE] [--json] — standalone REST
+      controller. security_config_generator.py --type {jwt|oauth2} [--roles
+      A,B] [--issuer-uri URL] [--package ...] [--output DIR] [--json] — Spring
+      Security config. dependency_analyzer.py {pom.xml|build.gradle}
+      [--check-security] [--output FILE] [--json] — CVE + outdated scan, exit
+      2/1 on critical/high. performance_profiler.py --analyze-queries DIR
+      [--output FILE] [--json] — static JPA/query scan + JVM tips, exit 2/1.
+      Every script supports --help and --json.
+  - category: Spring Boot patterns — references/spring-boot-best-practices.md
+    body: >
+      Load when scaffolding or reviewing a Spring Boot app. Covers layered
+      package structure, profile-based application.yml (dev/prod) and
+      ${VAR:default} secrets, REST controller structure, the HTTP status-code
+      table, RFC 7807 ProblemDetail error format, Jakarta request validation and
+      custom validators, the @RestControllerAdvice global exception handler,
+      unit (Mockito) and integration (MockMvc + Testcontainers) testing, actuator
+      / health-indicator / logging production setup, and a security checklist
+      (HTTPS, CORS, CSRF, input validation, SQL-injection prevention, rate
+      limiting, externalized secrets, dependency scanning).
+  - category: Microservices & Spring Cloud — references/microservices-patterns.md
+    body: >
+      Load for microservice decomposition and Spring Cloud wiring. Covers DDD
+      bounded contexts and decomposition strategies, Eureka service discovery,
+      Spring Cloud Gateway routing, Config Server, synchronous OpenFeign clients
+      with fallbacks, async RabbitMQ/Kafka events, Resilience4j circuit
+      breaker/retry/timelimiter/bulkhead, Micrometer+Zipkin distributed tracing,
+      choreography and orchestration sagas, event sourcing, CQRS, and
+      blue-green/canary deployment.
+  - category: JPA/Hibernate data layer — references/jpa-hibernate-guide.md
+    body: >
+      Load when designing entities/repositories or fixing query performance.
+      Covers entity design (@Version optimistic locking, audit fields),
+      One-to-Many/Many-to-One/Many-to-Many mappings with bidirectional helpers,
+      repository patterns, Specifications for dynamic queries, the three N+1
+      fixes (@EntityGraph, fetch join, @BatchSize/default_batch_fetch_size),
+      interface and DTO projections, first/second-level + query caching,
+      transaction management (propagation, isolation, readOnly), proper
+      indexing, and the common-pitfalls list.
+  - category: Spring Security — references/spring-security-reference.md
+    body: >
+      Load when implementing auth. Covers the JWT SecurityFilterChain,
+      JwtTokenProvider (access/refresh tokens, claims, validation),
+      OncePerRequestFilter auth filter, OAuth2 resource-server config + issuer/
+      jwk-set-uri yaml, RBAC (Role/User entities implementing UserDetails),
+      method security (@PreAuthorize/@PostAuthorize/@PostFilter with SpEL and
+      custom @bean security expressions), @WithMockUser security tests, and a
+      security best-practices checklist (bcrypt 12+, short-lived tokens, refresh,
+      rate limiting, secure headers, secret rotation).
+  - category: JVM & performance tuning — references/java-performance-tuning.md
+    body: >
+      Load for JVM/runtime tuning. Covers heap settings (-Xms=-Xmx), GC choice
+      (G1GC default, ZGC/Shenandoah for low latency), unified GC logging,
+      HikariCP pool sizing (formula and 10-20 default), Hibernate batch/fetch/
+      query-plan-cache settings, N+1 prevention, batch processing with
+      flush/clear, Spring Cache with Caffeine/Redis, async processing and Java 21
+      virtual threads, response compression, Micrometer metrics + JFR profiling,
+      and a performance anti-patterns list.
+
+scenarios:
+  - need: Stand up a new inventory microservice on Spring Boot 3.x with PostgreSQL and JWT auth.
+    context: classify-need → new project + data layer + auth, with type=microservice, db=postgresql, security=jwt, java=17.
+    action: >
+      Run scaffold-project (spring_project_scaffolder.py inventory-service --type
+      microservice --db postgresql --security jwt), then generate-entity-stack
+      for the domain entities (entity_generator.py Inventory --fields
+      "id:Long,productId:Long,quantity:Integer,warehouse:String"), then
+      harden-and-apply-best-practices using spring-boot-best-practices.md, then
+      audit-dependencies on the generated pom.xml.
+    outcome: A buildable project with layered architecture, profiles, Docker, CI, JWT security, and a validated entity stack — ready for business logic.
+  - need: Add a paginated read-only reporting API to an existing service.
+    context: classify-need → API surface only (no new entity). methods=GET, paginated.
+    action: Run generate-rest-endpoints (api_endpoint_generator.py reports --methods GET --paginated --package com.example), then add validation/error handling per spring-boot-best-practices.md.
+    outcome: A REST controller with Page/Pageable wiring and OpenAPI annotations, consistent with the rest of the codebase.
+  - need: Queries are slow and you suspect N+1 problems in the data layer.
+    context: classify-need → performance. The service has @OneToMany collections and findAll() repositories.
+    action: >
+      Run profile-performance (performance_profiler.py --analyze-queries src/),
+      read jpa-hibernate-guide.md for the fix, apply @EntityGraph or a fetch
+      join and switch EAGER to LAZY, paginate unbounded findAll(), then re-run
+      the profiler to confirm.
+    outcome: N+1 and unbounded-query findings resolved; the profiler reports no high-severity issues.
+  - need: Lock down endpoints with role-based access and verify dependencies are clean.
+    context: classify-need → auth + dependency hygiene. roles=ADMIN,USER,MANAGER.
+    action: >
+      Run generate-security-config (security_config_generator.py --type jwt
+      --roles ADMIN,USER,MANAGER), add @PreAuthorize to sensitive service methods
+      per spring-security-reference.md, then run audit-dependencies
+      --check-security and upgrade anything it flags critical/high.
+    outcome: Stateless JWT security with method-level RBAC and a dependency audit that exits 0 (no critical/high CVEs).
+
+anti_patterns:
+  - N+1 queries — always use @EntityGraph or fetch joins for relationships; let profile-performance flag them.
+  - Missing @Transactional on service methods that modify data (keep read methods readOnly).
+  - Blocking calls inside a WebFlux reactive pipeline.
+  - Hardcoded configuration or secrets instead of externalized profiles and ${VAR:default}.
+  - Missing input validation at the controller layer — validate every untrusted request body with Jakarta annotations.
+  - Leaving Open Session in View (open-in-view) enabled in production.
+  - EAGER fetch on collections; prefer LAZY with explicit fetching.
+  - Unbounded queries — never return whole tables; use Page/Slice pagination.
+  - Ignoring a non-zero exit from dependency_analyzer.py — a critical/high CVE is a gate, not advice.
+  - toString()/equals() cycles across bidirectional relationship fields.
+  - Treating generated scaffolding as finished — it is a starting point to harden, not production code as-is.
 
 integrations:
   - partner: senior-architect
-    body: >
-      Receives architecture decisions (service boundaries, data ownership, sync vs
-      async) that inform scaffolding choices — project type, database, messaging.
-      Invoke senior-architect first for any greenfield distributed system.
+    body: Provides architecture and microservice-decomposition decisions that inform scaffold-project choices (project type, service boundaries); pair with microservices-patterns.md.
   - partner: senior-backend
-    body: >
-      Sibling skill for general API patterns, database design, and backend
-      conventions. Compose when the work spans non-Spring backend concerns.
+    body: Shares general API patterns and database design; this skill specializes them into Spring Boot / JPA generated code.
   - partner: senior-devops
-    body: >
-      Receives generated Dockerfile and CI/CD pipeline output. Hand off for
-      Kubernetes deployment, environment promotion, and observability stack
-      integration.
+    body: Consumes the generated Dockerfile, docker-compose.yml, and GitHub Actions workflow for Kubernetes deployment and CI/CD pipelines.
   - partner: senior-qa
-    body: >
-      Receives generated test scaffolding. Hand off for QA automation,
-      contract tests, and end-to-end coverage.
-  - partner: senior-security
-    body: >
-      Pair for security audits and penetration testing once
-      spring-security-implementation completes. Especially when handling PII or
-      regulated data.
-  - partner: senior-frontend
-    body: >
-      Downstream consumer of OpenAPI specs for typed client generation. Workflow
-      pattern: senior-java → senior-frontend → senior-qa for full-stack features.
+    body: Builds on the generated test scaffolding (Mockito unit tests, MockMvc/Testcontainers integration tests) for QA automation.
   - partner: technical-writer
-    body: >
-      OpenAPI specs generated by api_endpoint_generator.py feed API documentation
-      pipelines.
-  - partner: business-analyst-toolkit
-    body: >
-      Upstream source of requirements that define entity models and API contracts.
-  - partner: product-manager-toolkit
-    body: >
-      Upstream source of user stories that guide feature implementation.
-  - partner: cs-java-engineer
-    body: >
-      Orchestrating agent. This skill is invoked by cs-java-engineer; coordinate
-      multi-skill workflows through that agent.
-
-scenarios:
-  - need: Stand up an order microservice with PostgreSQL persistence.
-    action: >
-      Run `python scripts/spring_project_scaffolder.py order-service --type
-      microservice --db postgresql`.
-    outcome: >
-      Complete Spring Boot 3.x project with layered architecture, Docker setup,
-      and GitHub Actions CI/CD pipeline ready for `mvnw clean package`.
-  - need: Generate the full entity stack for a User domain object.
-    action: >
-      Run `python scripts/entity_generator.py User --fields
-      "id:Long,email:String,name:String,createdAt:LocalDateTime"`.
-    outcome: >
-      JPA entity with Lombok, Spring Data repository, service with transaction
-      management, REST controller, DTO, and MapStruct mapper — all generated and
-      wired.
-  - need: Inventory microservice with JWT security and two domain entities.
-    context: >
-      Greenfield service in a microservices estate; PostgreSQL is the team
-      default; JWT is the existing platform auth method.
-    action: >
-      Scaffold with `--type microservice --db postgresql --security jwt`, then
-      generate Inventory and InventoryMovement entities with explicit
-      `--relations` flags, then add service-layer business logic, run
-      `./mvnw verify`, and `docker build`.
-    outcome: >
-      Production-ready service in 30–45 minutes versus several hours of manual
-      setup.
-  - need: Eliminate slow page loads traced to JPA N+1 patterns.
-    action: >
-      Run `performance_profiler.py --analyze-queries src/`, then add entity
-      graphs or `JOIN FETCH` queries to the flagged repositories, then re-run
-      the profiler to confirm.
-    outcome: >
-      Reduced query count per request; P99 latency moves under the 200ms target.
-
-anti_patterns:
-  - Allowing N+1 queries — always use entity graphs or fetch joins for relationships.
-  - Omitting `@Transactional` on service methods that modify data.
-  - Using blocking calls inside WebFlux reactive pipelines.
-  - Hardcoding configuration values instead of externalizing them with profiles.
-  - Skipping input validation at the controller layer.
-  - Leaving Open Session in View (OSIV) enabled in production.
-  - Auto-upgrading dependencies on critical/high CVE without running tests first.
-  - Preloading every reference doc upfront instead of loading on demand.
-  - Switching JPA fetch types blanket lazy→eager to "fix" N+1 — prefer entity graphs.
-  - Scaffolding without confirming target directory and overwrite behavior with the user.
+    body: Uses the SpringDoc/OpenAPI annotations emitted by the generators to produce API documentation.
+  - partner: business-analyst-toolkit / product-manager-toolkit
+    body: Requirements and user stories define the entity models, fields, and API contracts that drive entity_generator.py and api_endpoint_generator.py.
 ```

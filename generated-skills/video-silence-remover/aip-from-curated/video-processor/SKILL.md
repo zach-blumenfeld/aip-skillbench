@@ -1,127 +1,179 @@
 ---
 name: video-processor
 description: Process videos by removing segments and concatenating remaining parts. Use when you need to remove detected pauses/openings from videos, create highlight reels, or batch process segment removals using ffmpeg filter_complex.
-compatibility: Requires ffmpeg with libx264 and aac support, Python 3.11+, and sufficient disk space (output ≈ 70–80% of input size).
 metadata:
   aip:
-    spec: https://github.com/zach-blumenfeld/aip/tree/v0.2
-    schemaId: https://raw.githubusercontent.com/zach-blumenfeld/aip/v0.2/assets/aip-schemas/procedure.schema.json
+    spec: https://github.com/zach-blumenfeld/aip/tree/v0.3a2
+    schemaId: https://raw.githubusercontent.com/zach-blumenfeld/aip/v0.3a2/assets/aip-schemas/procedure.schema.json
+compatibility: Requires ffmpeg (with libx264 + aac) and Python 3.11+.
 ---
 
 ```yaml
 purpose: >
-  Remove specified time-range segments from a video and concatenate the
-  remaining parts into a single output file. Wraps
-  `scripts/process_video.py`, which builds an ffmpeg `filter_complex`
-  pipeline to trim audio and video together, re-encodes with libx264
-  (CRF 23) plus AAC audio, and emits a JSON report summarizing
-  compression and segment counts.
+  Remove specified time segments from a video and concatenate the
+  remaining parts into a single output using ffmpeg's filter_complex.
+  Given one or more JSON files listing segments to remove (e.g.
+  detected openings and pauses), it computes the complementary
+  keep-segments as their inverse, builds the trim/concat filter graph,
+  re-encodes with CRF (libx264 + aac) to preserve quality and audio
+  sync, and writes a statistics report. Handles many removal segments
+  in a single pass and the edge cases at the start and end of the
+  video. Scope is the cut-and-concatenate step: segment *detection* is
+  done upstream and supplied as input.
 
 trigger_when:
-  - User wants to remove detected pauses, silences, or opening segments from a video.
-  - User wants to build a highlight reel by dropping specific time ranges.
-  - User has one or more JSON files listing segments to remove and an input video.
-  - User asks to batch-process multiple removal segment files against the same video.
+  - Removing detected pauses/openings from a video and concatenating what remains.
+  - Creating a highlight reel by keeping only specific spans of a recording.
+  - Batch-processing many segment removals from one or more segments JSON files.
+  - You already have the segments-to-remove (start/end/duration) and need a frame-accurate cut-and-concat with re-encode.
 
 do_not_use_when:
-  - The required cut is sample-accurate (this pipeline is frame-accurate, not sample-accurate).
-  - No ffmpeg/libx264/aac install is available in the environment.
-  - The user wants to keep specific segments rather than remove them and has no removal list — invert upstream first.
+  - You still need to *detect* the silence, pauses, or opening — produce the removal-segments JSON first (audio energy analysis, scene detection, etc.), then use this skill.
+  - Sample-accurate cuts are required — this re-encodes and cuts are frame-accurate, not sample-accurate.
 
 scope_and_approval: >
-  Writes a new output video and a sibling `<output>_report.json`. Does
-  not modify the input. Long-running (~0.3× video duration). Confirm
-  the output path before invoking on large files to avoid overwriting
-  prior runs — the script passes `-y` to ffmpeg and will overwrite
-  silently.
+  Writes the output video and a sibling `<output>_report.json`,
+  overwriting any existing file at the output path (ffmpeg runs with
+  `-y`). Read-only on the input. Re-encoding is CPU-bound: budget
+  roughly 0.3x the video duration (~20 min for a 65-min video) and
+  ensure free disk for an output of ~70-80% of the input size. Faster
+  on machines with 2+ CPU cores. No network access.
 
 steps:
-  - name: prepare-segments
+  - name: prepare-removal-segments
     description: >
-      Collect one or more removal-segment JSON files. Each file is
-      either `{"segments": [{"start": s, "end": e, "duration": d}, ...]}`,
-      a bare list of segment objects, or a single segment object.
-      `start`/`end` are seconds from the video start; `duration` is
-      optional metadata used for reporting totals. Segments may come
-      from multiple files (e.g., one for the opening, one for detected
-      pauses); the script concatenates and sorts them by `start`.
-  - name: invoke-processor
-    description: |
-      Run the processor with the input video, desired output path, and
-      one or more removal-segment files:
-
-          python3 /root/.claude/skills/video-processor/scripts/process_video.py \
-              --input /path/to/input.mp4 \
-              --output /path/to/output.mp4 \
-              --remove-segments /path/to/segments.json [more.json ...]
-
-      The script probes input duration via `ffprobe`, computes the
-      keep-segments as the inverse of the removal list, builds the
-      `filter_complex` graph, and re-encodes with `-c:v libx264
-      -preset medium -crf 23 -c:a aac -b:a 128k`. Expect ~0.3× the
-      input duration in wall time on a 2+ core machine.
-    depends_on: [prepare-segments]
+      Collect the segment(s) to remove into one or more JSON files in
+      the expected format. Each segment needs `start` and `end`
+      seconds; include `duration` so the removal total can be summed.
+      Accepted shapes: an object with a `segments` array, a bare
+      array of segments, or a single segment object. Multiple files
+      are merged and sorted by `start`. Detecting these segments is
+      upstream of this skill.
+    outputs:
+      - name: removal-segments-files
+        type: list[string]
+        description: Path(s) to JSON file(s) listing segments to remove.
+  - name: process-video
+    description: >
+      Run the processor. It (1) loads and sorts the removal segments,
+      (2) probes the input duration with ffprobe, (3) computes the
+      keep-segments as the inverse of the removals over [0, duration]
+      — including the trailing tail — (4) builds a filter_complex that
+      trim/atrim + setpts/asetpts each keep-segment and concats the
+      video and audio streams, and (5) re-encodes (libx264 -preset
+      medium -crf 23, aac 128k) and writes the stats report. Cuts are
+      frame-accurate and audio stays in sync.
+    script: scripts/process_video.py
+    inputs:
+      - name: input-video
+        type: string
+        description: Path to the input video file (--input).
+      - name: output-video
+        type: string
+        description: Path to write the processed video (--output).
+      - name: removal-segments-files
+        type: list[string]
+        description: One or more removal-segment JSON files (--remove-segments).
+    outputs:
+      - name: output-video
+        type: string
+        description: The concatenated, re-encoded video at the output path.
+      - name: stats-report
+        type: object
+        description: Written to `<output>_report.json`; fields described in search_shortcuts.
   - name: verify-output
-    description: |
-      Read the generated `<output>_report.json` and confirm the
-      numbers match expectations. The report shape is:
+    description: >
+      Confirm the output file exists and sanity-check the stats
+      report: original_duration ≈ output_duration + removed_duration,
+      compression_percentage is plausible, and the
+      segments_removed / segments_kept counts match expectations. The
+      report's output_duration is measured by ffprobe on the result,
+      so it validates the actual cut rather than the planned one.
+    depends_on:
+      - process-video
+    inputs:
+      - name: stats-report
+        type: object
+      - name: output-video
+        type: string
 
-          {
-            "original_duration": 3908.61,
-            "output_duration": 3078.61,
-            "removed_duration": 830.0,
-            "compression_percentage": 21.24,
-            "segments_removed": 91,
-            "segments_kept": 91
-          }
-
-      `segments_kept` is the count of inverse keep-segments, not the
-      count of removal segments. If `compression_percentage` is far
-      from the expected total of segment `duration`s ÷ original
-      duration, the removal list was probably wrong (overlapping
-      ranges, off-by-one ends, or a stray full-video removal).
-    depends_on: [invoke-processor]
-
-decisions:
-  - signal: User wants different quality/size trade-off.
-    action: Edit `scripts/process_video.py` to change `-preset` (slower → better compression) and `-crf` (lower → higher quality, larger file). `-preset medium` + `-crf 23` is the bundled default.
-  - signal: Cut occurs mid-frame and audio/video drift is suspected.
-    action: Treat as a frame-accuracy limit, not a bug. If sample-accurate cuts are required, this script is the wrong tool — use a different pipeline.
-  - signal: Output file size is unexpectedly large or small.
-    action: Verify `crf` and `preset` were not overridden; check that the segment list actually removed what was intended by re-reading `<output>_report.json`.
-  - signal: ffmpeg fails or `subprocess.run` raises.
-    action: Re-run the same `ffmpeg` command manually without `capture_output=True` to see the underlying error. Most failures are missing codecs, an unwritable output path, or a segment whose `end` exceeds the video duration.
+search_shortcuts:
+  - category: CLI invocation
+    body: |
+      python3 scripts/process_video.py \
+        --input /path/to/input.mp4 \
+        --output /path/to/output.mp4 \
+        --remove-segments /path/to/segments.json
+      When mounted as a skill the absolute form is
+      python3 /root/.claude/skills/video-processor/scripts/process_video.py ...
+      --remove-segments accepts multiple files: --remove-segments opening.json pauses.json
+  - category: Parameters
+    body: |
+      --input            Path to the input video file (required).
+      --output           Path to the output video file (required).
+      --remove-segments  One or more JSON files listing segments to remove (required, nargs+).
+  - category: Removal-segment input format
+    body: |
+      Preferred: {"segments": [{"start": 0, "end": 600, "duration": 600},
+                                {"start": 610, "end": 613, "duration": 3}]}
+      Also accepted: a bare list of segment objects, or a single segment object.
+      Multiple files are concatenated and sorted by start time before processing.
+      start/end are seconds; duration is summed for the removal total in the report.
+  - category: Stats report format (<output>_report.json)
+    body: |
+      original_duration       — input duration in seconds (ffprobe).
+      output_duration         — measured output duration in seconds (ffprobe).
+      removed_duration        — original_duration - output_duration.
+      compression_percentage  — removed / original * 100, rounded to 2 dp.
+      segments_removed        — count of removal segments loaded.
+      segments_kept           — count of keep-segments concatenated.
+      Note: this is the processor's internal stats report. It is keyed differently
+      from any final task report that downstream tooling may require.
+  - category: FFmpeg filter_complex example (3 keep-segments)
+    body: |
+      [0:v]trim=start=600:end=610,setpts=PTS-STARTPTS[v0];
+      [0:a]atrim=start=600:end=610,asetpts=PTS-STARTPTS[a0];
+      [0:v]trim=start=613:end=1000,setpts=PTS-STARTPTS[v1];
+      [0:a]atrim=start=613:end=1000,asetpts=PTS-STARTPTS[a1];
+      [v0][v1]concat=n=2:v=1:a=0[outv];
+      [a0][a1]concat=n=2:v=0:a=1[outa]
+  - category: Encoding settings (preserve quality)
+    body: |
+      -c:v libx264 -preset medium -crf 23  — balanced speed/quality, good size.
+      -c:a aac -b:a 128k                    — re-encoded audio, kept in sync.
+      Output runs with -y (overwrites). Output size ≈ 70-80% of input.
+  - category: Dependencies
+    body: |
+      ffmpeg with libx264 and aac support; ffprobe (ships with ffmpeg).
+      Python 3.11+. No third-party Python packages required.
 
 scenarios:
-  - need: Compress a 65-minute lecture by removing the opening and detected pauses.
-    context: |
-      Two segment files exist: `opening.json` covering 0–600s, and
-      `pauses.json` listing ~90 short pauses scattered through the
-      lecture. Combined removal totals ~830s.
-    action: |
-      Invoke:
-
-          python3 /root/.claude/skills/video-processor/scripts/process_video.py \
-              --input /root/lecture.mp4 \
-              --output /root/compressed.mp4 \
-              --remove-segments /root/opening.json /root/pauses.json
-    outcome: 65 min → 51 min output (~21.2% compression). Report written to `/root/compressed_report.json`.
-  - need: Debug an unexpected filter_complex error.
-    context: |
-      For 3 keep-segments, the script generates a filter graph of this
-      shape (start/end values are illustrative):
-
-          [0:v]trim=start=600:end=610,setpts=PTS-STARTPTS[v0];
-          [0:a]atrim=start=600:end=610,asetpts=PTS-STARTPTS[a0];
-          [0:v]trim=start=613:end=1000,setpts=PTS-STARTPTS[v1];
-          [0:a]atrim=start=613:end=1000,asetpts=PTS-STARTPTS[a1];
-          [v0][v1]concat=n=2:v=1:a=0[outv];
-          [a0][a1]concat=n=2:v=0:a=1[outa]
-    action: Print the generated filter (add a `print(filter_complex)` before the `subprocess.run` call) and re-run ffmpeg directly with that filter to isolate the syntax error from the surrounding orchestration.
+  - need: Remove a detected opening and the long pauses from a 65-minute lecture.
+    context: >
+      Upstream detection produced opening.json and pauses.json listing
+      the segments to remove (start/end/duration each).
+    action: >
+      python3 scripts/process_video.py --input /root/lecture.mp4
+      --output /root/compressed.mp4 --remove-segments /root/opening.json
+      /root/pauses.json
+    outcome: >
+      65 min → 51 min (≈21.2% compression); compressed.mp4 plus
+      compressed_report.json with original/output/removed durations and
+      segment counts.
+  - need: Apply a single segments file with many cuts in one pass.
+    action: >
+      python3 scripts/process_video.py --input video.mp4 --output
+      output.mp4 --remove-segments segments.json — the processor inverts
+      the ~91 removal segments into the keep-segments and concatenates
+      them in a single ffmpeg filter_complex.
+    outcome: >
+      One re-encoded output.mp4 with all removals applied and a report
+      summarizing the compression.
 
 anti_patterns:
-  - Passing keep-segments instead of remove-segments — the `--remove-segments` flag is the inverse of what the script outputs. Invert upstream if you only have a keep list.
-  - Letting two removal files overlap without checking. The script sorts by `start` but does not merge overlapping ranges, so an overlap leaves a gap of zero-length keep-segment and may produce a filter ffmpeg refuses.
-  - Running the script on a machine without 2+ CPU cores and expecting the ~0.3× wall-time figure — encoding throughput scales with cores.
-  - Re-running with the same `--output` path expecting a prompt; ffmpeg `-y` overwrites silently.
+  - Using this skill to find the silence/opening — it only cuts and concatenates segments supplied to it; detect first, then process.
+  - Expecting sample-accurate cuts — the re-encode is frame-accurate; cut boundaries land on frame edges.
+  - Omitting `duration` from removal segments — the removal-total sum relies on it (output_duration is still measured independently by ffprobe).
+  - Running without enough free disk for an output ~70-80% of the input size, or assuming it is instant — budget ~0.3x the video duration to encode.
+  - Pointing --output at a file you want to keep — ffmpeg runs with -y and overwrites it.
 ```
