@@ -1,0 +1,19 @@
+# Focused human-vs-AIP comparison on the 3 medium tasks, AIP spec v0.3a2,
+# solver = Sonnet. 3 tasks × 3 skill-bearing modes × 5 trials = 45 cells.
+# noskill/selfgen omitted — this isolates human-curated vs the two AIP modes.
+# Requires v0.3a2 packs in generated-skills/ for all 3 tasks (batch-convert
+# must have finished). concurrency 6 ≈ 6 Docker containers, safe on 13.6 GB.
+tasks:
+  - crystallographic-wyckoff-position-analysis
+  - drone-planning-control
+  - earthquake-plate-calculation
+models:
+  - claude-sonnet-4-6
+modes:
+  - human-curated
+  - aip-from-instruction
+  - aip-from-curated
+trials: 5
+concurrency: 6
+agent: claude-agent-acp
+sandbox: docker

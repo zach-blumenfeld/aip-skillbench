@@ -1,9 +1,0 @@
-{
-  "original_duration_seconds": 0,
-  "compressed_duration_seconds": 0,
-  "removed_duration_seconds": 0,
-  "compression_percentage": 0,
-  "segments_removed": [
-    { "start": 0, "end": 0, "duration": 0 }
-  ]
-}

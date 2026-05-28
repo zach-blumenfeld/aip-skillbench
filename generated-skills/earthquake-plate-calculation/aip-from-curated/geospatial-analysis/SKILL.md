@@ -1,128 +1,178 @@
 ---
 name: geospatial-analysis
-description: Analyze geospatial data using geopandas with proper coordinate projections. Use when calculating distances between geographic features, performing spatial filtering, or working with plate boundaries and earthquake data.
+description: "Analyze geospatial data with geopandas while enforcing the projection discipline that makes distance calculations correct (EPSG:4326 for storage, EPSG:4087 for distance). Use when calculating distances between geographic features, performing spatial filtering, finding furthest/closest points to a boundary, or working with plate boundaries, earthquakes, and other lat/lon datasets."
 license: MIT
 metadata:
   aip:
-    spec: https://github.com/zach-blumenfeld/aip/tree/v0.2
-    schemaId: https://raw.githubusercontent.com/zach-blumenfeld/aip/v0.2/assets/aip-schemas/procedure.schema.json
+    spec: https://github.com/zach-blumenfeld/aip/tree/v0.3a2
+    schemaId: https://raw.githubusercontent.com/zach-blumenfeld/aip/v0.3a2/assets/aip-schemas/procedure.schema.json
+compatibility: Requires Python 3 with geopandas, shapely, and pandas. Helpers in scripts/geo_ops.py.
 ---
 
 ```yaml
 purpose: >
-  Analyze geospatial data with geopandas using proper coordinate
-  projections. Project geographic data (EPSG:4326) to a metric CRS
-  (EPSG:4087) before computing distances, combine multi-segment
-  geometries with .unary_union, and use vectorized geopandas
-  operations instead of hand-rolled formulas. Scope is the procedure
-  for point/polygon/boundary workflows over earthquakes, tectonic
-  plates, and similar geographic features.
+  Analyze geographic data (points, lines, polygons) with geopandas while
+  enforcing the projection discipline that makes distance calculations
+  correct. The flow is: load source data into a GeoDataFrame in EPSG:4326,
+  filter points to a polygon via `.within()` against `.unary_union`,
+  project to EPSG:4087 (World Equidistant Cylindrical) for any distance
+  work, return distances in kilometres, and select extremes. The bundled
+  `scripts/geo_ops.py` helper keeps the "never compute distance in
+  EPSG:4326" rule and the metre→kilometre conversion in one place.
+  Authored for the earthquake-vs-plate-boundary pattern but applies to any
+  point/polygon/line analysis on Earth.
 
 trigger_when:
-  - User asks to calculate distance between geographic features (points, lines, polygons).
-  - Working with earthquake, plate, or boundary GeoJSON data.
-  - Spatially filtering points by polygon containment.
-  - Loading or working with .geojson / .json files that contain geometries.
-  - User mentions plate boundaries, tectonic plates, or earthquake locations.
-  - Need to find the nearest/furthest geographic feature from a set of candidates.
+  - Calculating the distance between geographic features (point→line, point→polygon, point→point).
+  - Filtering points by polygon membership (e.g. earthquakes inside a specific tectonic plate).
+  - Working with plate boundaries, earthquake catalogs, or any lat/lon point dataset.
+  - Loading GeoJSON files or converting raw lat/lon records into a GeoDataFrame.
+  - Finding the furthest or closest point to a boundary or set of features.
+  - User mentions geopandas, shapely, CRS/EPSG, projections, spatial join, `.within`, or `.distance`.
 
 do_not_use_when:
-  - Working with non-geographic tabular data that has no coordinates.
-  - Task is purely cartographic rendering (drawing maps) with no spatial computation.
-  - A specialized routing, geocoding, or raster-analysis skill is more appropriate than vector spatial ops.
+  - The data has no geographic coordinates — this skill is for lat/lon analysis, not generic 2-D geometry.
+  - The task requires great-circle distances at antipodal or continent-spanning scale where EPSG:4087's tangential distortion matters; pick a region-appropriate metric CRS (e.g. a local UTM zone) instead.
+
+scope_and_approval: >
+  Read-only on input files. All computation is in-memory GeoDataFrames;
+  the helper writes no files, makes no network calls, and performs no
+  destructive operations. Safe to run without prompting.
 
 steps:
-  - name: load-data
+  - name: load-geospatial-data
     description: >
-      Load geospatial inputs. Use gpd.read_file("file.json") for
-      GeoJSON. For tabular coordinate data, build geometry with
-      [Point(row["lon"], row["lat"]) for row in data] and wrap in
-      gpd.GeoDataFrame(data, geometry=geometry, crs="EPSG:4326").
-      Always set the CRS at construction time.
-  - name: filter-attributes
-    description: >
-      Narrow the data before expensive spatial operations. Filter by
-      attribute equality (e.g., gdf_plates[gdf_plates["Code"] ==
-      "PA"]) or string pattern (e.g.,
-      gdf_boundaries["Name"].str.contains("PA")). Reducing row count
-      first makes projection and distance calls much cheaper.
+      Load source data into a GeoDataFrame in EPSG:4326 (the canonical
+      storage CRS). For GeoJSON / shapefile / any geopandas-readable file,
+      use `load_geojson(path)`. For raw records with latitude/longitude
+      fields (e.g. an earthquake catalog), use
+      `points_from_records(records, lat_key, lon_key)`. Non-coordinate
+      columns are preserved as attributes.
+    script: scripts/geo_ops.py
+    inputs:
+      - name: input-source
+        type: object
+        description: Path to a geospatial file OR list of dict records carrying lat/lon fields.
+    outputs:
+      - name: gdf
+        type: object
+        description: GeoDataFrame in EPSG:4326 with attribute columns intact.
   - name: spatial-filter
     description: >
-      Apply spatial containment with .within(). Build the target
-      polygon via target = subset.geometry.unary_union, then
-      points_inside = gdf_points[gdf_points.within(target)]. Add
-      .copy() on the resulting slice if you will mutate it
-      downstream to avoid SettingWithCopyWarning.
-  - name: combine-geometries
+      Reduce a point GeoDataFrame to those falling inside a polygon (or
+      the union of several polygons). Call
+      `filter_points_within(gdf_points, gdf_polygon, where=...)` and pass
+      an attribute-based mask over the polygon GeoDataFrame — e.g.
+      `gdf_plates["Code"] == "PA"`, `gdf_plates["PlateName"] == "Pacific"`,
+      or a substring `gdf_plates["Name"].str.contains("PA")`. The helper
+      `.unary_union`s the matching features before testing membership and
+      returns an independent copy (so adding columns later does not raise
+      pandas' SettingWithCopyWarning). Skip this step when the analysis
+      covers all input points.
+    script: scripts/geo_ops.py
+    depends_on: [load-geospatial-data]
+    inputs:
+      - name: gdf-points
+        type: object
+      - name: gdf-polygon
+        type: object
+      - name: where
+        type: object
+        nullable: true
+        description: Optional pandas boolean mask over `gdf-polygon` to restrict membership before the union.
+    outputs:
+      - name: points-inside
+        type: object
+        description: Copy of `gdf-points` containing only rows whose geometry is within the (unioned) polygon.
+  - name: compute-distance-to-target
     description: >
-      Merge multiple polygons or line segments into a single
-      geometry with .geometry.unary_union before distance or
-      containment operations. A single unioned geometry is both
-      faster and more accurate than iterating segment-by-segment.
-  - name: project-to-metric-crs
+      Compute each point's shortest distance to the target feature(s) with
+      `distance_km_to(gdf_points, gdf_target, where=...)`. The helper
+      projects both inputs to EPSG:4087, drops missing geometries,
+      `.unary_union`s the target so the distance is to the combined
+      geometry (not per-segment), calls `.distance()`, and adds
+      `distance_m` and `distance_km` columns to a *copy* of the input
+      points (still in EPSG:4326). Use `where` to scope the target —
+      `(gdf_boundaries["PlateA"] == "PA") | (gdf_boundaries["PlateB"] == "PA")`
+      when boundary features encode adjacent plates explicitly,
+      `gdf_boundaries["Name"].str.contains("PA")` when only a name string
+      is available. NEVER call `.distance()` directly on EPSG:4326
+      geometries — the value is degrees, not metres, and shrinks toward
+      the poles.
+    script: scripts/geo_ops.py
+    depends_on: [load-geospatial-data]
+    inputs:
+      - name: gdf-points
+        type: object
+      - name: gdf-target
+        type: object
+        description: GeoDataFrame of points, lines, or polygons to measure distance against.
+      - name: where
+        type: object
+        nullable: true
+        description: Optional pandas boolean mask over `gdf-target`.
+    outputs:
+      - name: gdf-points-with-distance
+        type: object
+        description: A new GeoDataFrame — same rows as `gdf-points` plus `distance_m` and `distance_km` columns.
+  - name: select-extreme-point
     description: >
-      Convert geometries from EPSG:4326 (degrees) to a metric CRS
-      such as EPSG:4087 with .to_crs("EPSG:4087") before any
-      distance calculation. Project once outside loops, and project
-      only the filtered subset — never the raw large dataset.
-  - name: compute-distances
-    description: >
-      Call .distance() on projected geometries to get distances in
-      meters, then divide by 1000.0 for kilometers. Assign as a
-      column (gdf["distance_km"] = projected.geometry.distance(target)
-      / 1000.0) so downstream sorting and reporting can use it.
-  - name: rank-results
-    description: >
-      Use .nlargest(n, "distance_km") or .nsmallest(n,
-      "distance_km") to retrieve furthest or nearest features.
-      Extract a single row with .iloc[0] and report named fields
-      (id, name, magnitude, distance_km) rather than positional
-      indices.
-
-decisions:
-  - signal: Distances need to be computed between geographic features.
-    action: Project both sides to EPSG:4087 (or another metric CRS) before calling .distance(). Never compute distance directly on EPSG:4326 geometries — the result is in degrees and is not a uniform unit on Earth's surface.
-  - signal: Multiple boundary segments or polygons must be treated as one feature.
-    action: Combine them with .geometry.unary_union before calling .distance() or .within().
-  - signal: Dataset is large and only a subset is relevant.
-    action: Filter by attribute first (equality, .str.contains), then project the small subset — not the other way around.
-  - signal: Some features in the GeoDataFrame have no geometry.
-    action: Filter with gdf[gdf.geometry.notna()] before spatial operations to avoid NaN/None propagation.
-  - signal: Geometries cross the antimeridian (±180° longitude).
-    action: Use geopandas spatial operations directly. Do not adjust longitudes by ±360 manually — geopandas handles wrap-around correctly.
-  - signal: A filtered slice will be mutated (new column, in-place edit).
-    action: Take .copy() on the slice before mutating to avoid SettingWithCopyWarning and silent aliasing bugs.
+      Pick the furthest or closest point with
+      `extreme_by_distance(gdf, mode, n, column='distance_km')`, a thin
+      wrapper over `nlargest` / `nsmallest`. `mode='max'` → furthest;
+      `mode='min'` → closest. Always returns a GeoDataFrame slice; use
+      `.iloc[0]` if the consumer wants a single row as a Series.
+    script: scripts/geo_ops.py
+    depends_on: [compute-distance-to-target]
+    inputs:
+      - name: gdf-points-with-distance
+        type: object
+      - name: mode
+        type: string
+        description: '"max" for furthest, "min" for closest.'
+      - name: 'n'
+        type: integer
+        description: Number of rows to return.
+    outputs:
+      - name: extreme-rows
+        type: object
+        description: Top-n rows ordered by `distance_km` in the requested direction.
 
 scenarios:
-  - need: Find the earthquake within the Pacific plate that is furthest from any Pacific plate boundary.
-    context: >
-      Inputs are earthquake records with longitude/latitude fields
-      plus plates.json and boundaries.json GeoJSON files. Plates
-      carry "Code" and "PlateName"; boundaries carry "Name" with
-      tokens like "PA" identifying adjacent plates.
+  - need: Find the earthquake inside the Pacific plate that is furthest from any Pacific-related plate boundary.
     action: >
-      (1) Build gdf_eq from the earthquake records as a
-      GeoDataFrame in EPSG:4326. (2) Compute target_plate =
-      gdf_plates[gdf_plates["Code"] == "PA"].geometry.unary_union
-      and filter gdf_eq[gdf_eq.within(target_plate)].copy().
-      (3) Project that subset to EPSG:4087. (4) Project and union
-      the PA-related boundaries via
-      gdf_boundaries[gdf_boundaries["Name"].str.contains("PA")]
-      .to_crs("EPSG:4087").geometry.unary_union.
-      (5) Assign earthquakes_in_plate["distance_km"] =
-      eq_proj.geometry.distance(boundary_geom) / 1000.0.
-      (6) Return earthquakes_in_plate.nlargest(1,
-      "distance_km").iloc[0].
-    outcome: The single furthest earthquake by metric distance, with the distance reported in kilometers.
+      Load earthquakes via `points_from_records` and plates / boundaries
+      via `load_geojson`. Call
+      `filter_points_within(gdf_eq, gdf_plates, where=gdf_plates["Code"] == "PA")`
+      to keep only earthquakes inside the Pacific plate, then
+      `distance_km_to(filtered, gdf_boundaries, where=gdf_boundaries["Name"].str.contains("PA"))`,
+      then `extreme_by_distance(..., mode='max', n=1).iloc[0]`.
+    outcome: A single row carrying the furthest earthquake's attributes plus its `distance_km` to the nearest Pacific-related boundary.
+  - need: Boundary features for a plate are split across many segments.
+    action: >
+      Let the helpers handle the union — both `filter_points_within` and
+      `distance_km_to` `.unary_union` the target features after applying
+      `where`, so segments behave as a single geometry and `.distance()`
+      returns the shortest distance to any segment in one call.
+    outcome: One distance value per point, to the combined boundary — no per-segment loop, no manual min.
+  - need: Boundary GeoJSON encodes the two adjacent plates as separate columns (`PlateA`, `PlateB`) rather than a substring.
+    action: Pass `where=(gdf_boundaries["PlateA"] == "PA") | (gdf_boundaries["PlateB"] == "PA")` to `distance_km_to`.
+    outcome: Only boundaries that actually involve plate PA are unioned and measured against.
+  - need: Working dataset is large (millions of points) and only a small region is in scope.
+    action: >
+      Filter in EPSG:4326 first (`filter_points_within` or a plain
+      attribute mask), then call `distance_km_to` on the reduced subset.
+      The helper projects to EPSG:4087 internally; projecting before
+      filtering reprojects rows you will throw away.
+    outcome: Same result, far less projection work.
 
 anti_patterns:
-  - Calling .distance() on EPSG:4326 geometries — returns degrees, not meters, and is incorrect outside a narrow band of latitudes.
-  - Hand-implementing the Haversine formula instead of using geopandas projections plus .distance().
-  - Iterating through individual boundary points to find the closest one — call .distance() once against the .unary_union of the boundary set.
-  - Manually shifting longitudes by ±360 to handle the antimeridian — let geopandas spatial operations handle wrap-around.
-  - Projecting a large GeoDataFrame to a metric CRS just to filter it down — filter on attributes first, then project the subset.
-  - Projecting inside a loop instead of once before the loop.
-  - Mutating a filtered slice without .copy() — produces SettingWithCopyWarning and silent corruption.
-  - Implementing point-in-polygon checks by hand instead of using .within().
-  - Forgetting to set crs="EPSG:4326" when constructing a GeoDataFrame from raw lon/lat — downstream .to_crs() will fail or produce wrong results.
+  - Calling `.distance()` on EPSG:4326 geometries. The result is in *degrees*, not metres, and a degree of longitude at the equator is ~111 km while a degree near the pole is far less — every distance is silently wrong.
+  - Implementing your own Haversine formula. The point of the skill (and geopandas) is correct projected distances; `distance_km_to` already enforces the projection.
+  - Iterating per boundary segment and taking the minimum. Use `.unary_union` (already handled inside the helpers) so a single `.distance()` call returns the shortest distance to the combined geometry.
+  - Projecting a large GeoDataFrame to EPSG:4087 first and then filtering on attributes. Filter (or `.within`) in EPSG:4326, then project the small subset.
+  - Manually adjusting longitudes by ±360° to handle the antimeridian. Geopandas' projected geometries handle the wrap.
+  - Looking for the new columns in the original GeoDataFrame after calling `distance_km_to`. It returns a *new* GeoDataFrame; reassign the result.
+  - Forgetting that `nlargest(1, ...)` returns a one-row DataFrame, not a Series. Use `.iloc[0]` if the consumer wants the row as a Series.
+  - Leaving rows whose geometry is missing in the input. `distance_km_to` drops them from the *target* but not from the points — filter beforehand with `gdf[gdf.geometry.notna()]` if the points dataset can contain nulls.
 ```

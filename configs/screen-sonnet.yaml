@@ -1,0 +1,47 @@
+# Difficulty screen for Sonnet: noskill-only, n=1, to map which tasks land in
+# the engageable band (mean reward ~0.1-0.9) vs ceiling/floor on this solver.
+# No AIP packs needed (noskill skips the run-matrix AIP pre-flight check), so
+# this can range over not-yet-converted tasks freely.
+#
+# 17 hard (spanning all 8 usable categories) + 3 already-converted mediums as a
+# ceiling reference. After running, keep survivors in the 0.1-0.9 band to fill
+# the 9-hard + 3-medium full-eval frame; prefer survivors already in
+# generated-skills/ to avoid extra Opus authoring.
+tasks:
+  # cybersecurity
+  - dapt-intrusion-detection            # hard  (Haiku: differentiated)
+  - fix-druid-loophole-cve              # hard  (Haiku: floored — does Sonnet crack it?)
+  - fix-erlang-ssh-cve                  # hard  (not yet run)
+  # finance-economics
+  - financial-modeling-qa               # hard  (Haiku: floored)
+  - invoice-fraud-detection             # hard  (not yet run)
+  # industrial-physical-systems
+  - energy-market-pricing               # hard  (Haiku: differentiated)
+  - energy-unit-commitment              # hard  (not yet run)
+  # mathematics-or-formal-reasoning
+  - civ6-adjacency-optimizer            # hard  (Haiku: floored)
+  - paratransit-routing                 # hard  (not yet run)
+  # media-content-production
+  - video-silence-remover               # hard  (Haiku: floored)
+  - video-tutorial-indexer              # hard  (not yet run)
+  # natural-science
+  - earthquake-phase-association        # hard  (Haiku: differentiated)
+  - mars-clouds-clustering              # hard  (not yet run)
+  # office-white-collar
+  - taxonomy-tree-merge                 # hard  (Haiku: differentiated)
+  - jpg-ocr-stat                        # hard  (not yet run)
+  # software-engineering
+  - debug-trl-grpo                      # hard  (Haiku: differentiated)
+  - react-performance-debugging         # hard  (not yet run)
+  # medium ceiling-reference (already converted)
+  - crystallographic-wyckoff-position-analysis  # medium
+  - drone-planning-control                       # medium
+  - earthquake-plate-calculation                 # medium
+models:
+  - claude-sonnet-4-6
+modes:
+  - noskill
+trials: 1
+concurrency: 4
+agent: claude-agent-acp
+sandbox: docker

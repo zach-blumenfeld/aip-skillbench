@@ -1,36 +1,60 @@
-# Source README — flight-plan-parser (AIP conversion)
+# Source — flight-plan-parser (AIP conversion)
 
-This folder bundles the canonical sources used to compile the AIP
-`SKILL.md` for `flight-plan-parser`.
+## What this skill is
 
-## Files
+Converts natural-language flight commands (the four shapes the drone
+simulator accepts) into the `(waypoints, waypoint_times, modes)` triple that
+`trajectory_planner` and `main.py` consume.
 
-- `procedure.schema.json` — the AIP procedure schema this skill validates
-  against. Bundled locally so the skill is self-contained.
-- `ORIGINAL_SKILL.md` — verbatim copy of the curated Agent Skill
-  `SKILL.md` from
-  `vendor/skillsbench/tasks/drone-planning-control/environment/skills/flight-plan-parser/SKILL.md`.
+## Provenance
 
-## Conversion notes
+Adapted from
+`vendor/skillsbench/tasks/drone-planning-control/environment/skills/flight-plan-parser/SKILL.md`
+(see `ORIGINAL_SKILL.md` in this directory). The original is freeform prose
+describing the regex strategy, state machine, and output shapes; this AIP
+version preserves the same content but moves the parser logic into a
+script-backed step graph so the agent can drop a working module into the
+project rather than re-deriving it.
 
-- Schema choice: `procedure` — the source describes a multi-step parsing
-  procedure (parse commands → maintain state → emit waypoints/times/modes).
-- The original source contained no `scripts/`, `references/`, or `assets/`
-  subdirectories, so none were carried over.
-- Frontmatter `name` is preserved as `flight-plan-parser` per the task
-  contract (the task's mounted skill name must match).
+## Schema choice
 
-## Source-to-body mapping
+- `procedure.schema.json` (procedure category) — the original is a workflow:
+  ingest commands → parse → emit structured output. No new schema required.
 
-- **Overview** → `purpose`.
-- **Output Format** → `purpose` (output contract paragraph).
-- **Supported Commands** table → `search_shortcuts` entry (`commands`
-  category) so the four command patterns remain queryable as a group.
-- **Implementation Logic** → ordered `steps` (init-parser →
-  auto-insert-start → parse-line → finalize-arrays → expose-entrypoint).
-- **Regex Strategy** → step `parse-line` description and a dedicated
-  `regex` search-shortcut entry covering capture groups and flags.
-- **Key Design Rules** → `decisions` (signal → action) for the
-  start-waypoint and copy-position invariants.
-- **Usage** example → `scenarios` entry.
-- No content was deliberately dropped.
+## Source → AIP mapping
+
+| Original SKILL.md content                                  | AIP location                                        |
+| ---------------------------------------------------------- | --------------------------------------------------- |
+| Overview / output format                                   | `purpose`, `references/command-grammar.md`          |
+| Supported commands table                                   | `references/command-grammar.md`                     |
+| Implementation logic (stateful parser, ensure-start, etc.) | `scripts/flight_plan_parser.py`                     |
+| Regex strategy (case-insensitive, capture groups)          | `scripts/flight_plan_parser.py` + grammar reference |
+| Key design rules (auto-start waypoint, copy lists)         | `scripts/flight_plan_parser.py` + grammar reference |
+| Usage snippet (single-command example)                     | `scenarios` in `SKILL.md` + grammar reference       |
+
+## Notable corrections / additions vs. the original
+
+The original SKILL.md says *"Auto-insert a starting waypoint at (0, 0, 0,
+t=0) on the first command if the list is empty."* That is true for the
+`takeoff` handler but not the full story:
+
+- `hover` snaps `_pos.z = h` **before** inserting the start waypoint, so a
+  leading hover starts at z=h, not z=0.
+- `land` snaps `_pos.z = h` similarly so the descent starts at the stated
+  altitude.
+- `fly` seeds the start from its `from (...)` triple, overriding the default
+  origin.
+
+The reference implementation in the canonical oracle solution
+(`tasks/drone-planning-control/solution/solve.sh`) shows the precise per-mode
+ordering. The script bundled here mirrors that ordering exactly; the grammar
+reference documents it explicitly so it is no longer load-bearing on prose.
+
+The `Fly` regex also tolerates an optional `location` keyword between the
+`from (...)` and `to (...)` clauses (matching the oracle behaviour), which
+the original SKILL.md did not document.
+
+## Deliberate drops
+
+None. Every line of the original is either captured in the SKILL.md body, a
+scenario, the grammar reference, or the script.

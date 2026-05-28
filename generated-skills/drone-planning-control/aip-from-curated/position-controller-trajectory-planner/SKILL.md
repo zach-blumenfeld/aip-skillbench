@@ -3,119 +3,274 @@ name: position-controller-trajectory-planner
 description: Use this skill when implementing the outer control loop for a quadrotor — position PID control (position/velocity error → thrust and desired acceleration) and trajectory planning from flight-plan waypoints (takeoff, hover, fly, land segments → smooth 15-row state matrix).
 metadata:
   aip:
-    spec: https://github.com/zach-blumenfeld/aip/tree/v0.2
-    schemaId: https://raw.githubusercontent.com/zach-blumenfeld/aip/v0.2/assets/aip-schemas/procedure.schema.json
+    spec: https://github.com/zach-blumenfeld/aip/tree/v0.3a2
+    schemaId: https://raw.githubusercontent.com/zach-blumenfeld/aip/v0.3a2/assets/aip-schemas/procedure.schema.json
+compatibility: Requires Python 3, numpy, scipy, PyYAML. Reads system_params.yaml from /root/system_params.yaml by default.
 ---
 
 ```yaml
 purpose: >
-  Implement the quadrotor outer control loop as two cooperating modules: a
-  trajectory planner that converts waypoints plus segment modes into a
-  (15 × max_iter) desired-state matrix using cubic splines, and a position
-  PID controller that maps position and velocity errors to thrust F and
-  desired acceleration. Outputs land under /root/results/<label>/ so the
-  test suite can verify the planned trajectory stays within the drone's
-  physical acceleration limits at every timestep.
+  Build the quadrotor outer loop. Two cooperating modules: a trajectory
+  planner that turns a parsed flight plan (waypoints + per-segment modes:
+  hover / takeoff / fly / land) into a smooth (15 × max_iter) desired-state
+  matrix via cubic splines, and a PID position controller that closes the
+  loop on position/velocity errors to produce thrust F and desired
+  acceleration. The planned trajectory must stay inside the drone's
+  physical acceleration envelope so the motors never saturate; the
+  controller's integral term must be allocated per run, never via a
+  mutable default. Outputs land under `/root/results/<label>/` so the
+  verifier can pick them up.
 
 trigger_when:
-  - Implementing the outer (position) control loop for a quadrotor.
-  - Converting flight-plan waypoints (takeoff / hover / fly / land) into a smooth (15 × max_iter) state matrix.
-  - Computing thrust F and desired acceleration from position/velocity errors via PID.
-  - Tuning PID gains for altitude tracking, hover stability, or trajectory following.
-  - Saving planned_trajectory.npy, metrics_3d.json, tuning_results.json, and plots for a drone planning-control command file.
+  - Implementing the outer loop of a quadrotor (position control + trajectory planning).
+  - Converting a parsed flight plan (waypoints, times, modes) into a desired-state matrix.
+  - Computing the thrust and desired acceleration to hand to the attitude planner.
+  - Tuning position-PID gains to meet per-timestep tracking accuracy and overshoot targets.
+  - Verifying that a planned trajectory respects the drone's physical acceleration limits.
+
+do_not_use_when:
+  - Implementing the inner attitude loop or motor model (use the sibling skills `attitude-controller-planner`, `motor-model-dynamics`).
+  - Parsing raw natural-language flight commands (use `flight-plan-parser`; its output feeds this skill).
+  - Computing step-response metrics (use `stepinfo-3d`); plotting trajectories (use `plot-quadrotor`).
+
+scope_and_approval: >
+  Writes only inside `/root/results/<label>/` (the per-command output
+  folder), specifically `planned_trajectory.npy` and any files the
+  surrounding pipeline writes alongside it. Reads `system_params.yaml`.
+  No network access, no destructive operations elsewhere on the
+  filesystem. Safe to run without prompting.
 
 steps:
-  - name: build-trajectory-planner
+  - name: gather-inputs
     description: >
-      Implement trajectory_planner(waypoints, max_iter, waypoint_times,
-      sample_rate, modes) returning a (15 × max_iter) state matrix with
-      rows 0:3 position, 3:6 velocity, 6:9 orientation, 9:12 angular
-      velocity, 12:15 acceleration. Branch per segment mode: 'hover' holds
-      constant position with zero velocity and acceleration; 'takeoff'
-      fits a cubic spline from ground to target height; 'fly' fits a cubic
-      spline from start position to end position; 'land' fits a cubic
-      spline from current height to ground. The planner takes only the
-      modes argument from the flight plan parser — never a `question`
-      argument.
-  - name: build-waypoint-trajectory
+      Read `dt = 1.0 / params['sample_rate']` and `time_final =
+      waypoint_times[-1]` from the parsed flight plan and system_params.
+      Never hardcode either. Derive `max_iter` from these so the
+      trajectory length matches the simulation length.
+    inputs:
+      - name: params
+        type: object
+        description: Loaded system_params.yaml (mass, gravity, sample_rate, accel limits, ...).
+      - name: waypoints
+        type: object
+        description: (4, n_points) array of [x; y; z; yaw] columns from flight_plan_parser.
+      - name: waypoint_times
+        type: object
+        description: Length-n_points absolute arrival times, starting at 0.
+      - name: modes
+        type: object
+        description: List of per-segment modes ('hover' | 'takeoff' | 'fly' | 'land').
+    outputs:
+      - name: sample_rate
+        type: float
+      - name: dt
+        type: float
+      - name: max_iter
+        type: integer
+        description: Number of timesteps the trajectory matrix and simulation will span.
+
+  - name: plan-trajectory
     description: >
-      Implement WaypointTrajectory as a callable that steps through the
-      cubic spline one sample at a time. In __init__, fit a CubicSpline
-      over all waypoints versus their arrival times, store
-      dt = 1 / sample_rate, and initialise t_current to the first waypoint
-      time. On each __call__, evaluate the spline at t_current for
-      position, its first derivative for velocity, and second derivative
-      for acceleration; advance t_current by dt; return
-      (pos, quaternion, vel, acc, zeros(3)). For non-hover segments, fit
-      a separate CubicSpline over [t_start, t_end] versus
-      [yaw_start, yaw_end] to interpolate yaw smoothly.
-  - name: build-position-controller
+      Call `trajectory_planner(waypoints, max_iter, waypoint_times,
+      sample_rate, modes)` to build the (15 × max_iter) desired-state
+      matrix. Per segment: 'hover' holds position with zero velocity and
+      acceleration; the other modes fit a cubic spline (clamped so
+      velocity is zero at both endpoints, which keeps the planner in
+      sync with the drone's at-rest state and avoids the large
+      initial-velocity mismatch that pushes per-timestep error above the
+      0.05 m tolerance). Yaw is interpolated by a separate cubic spline
+      over `[t_start, t_end]`. Row layout: 0:3 pos, 3:6 vel, 6:9
+      orientation (yaw at row 8), 9:12 angular vel, 12:15 acceleration.
+      The planner takes only the parsed flight-plan outputs — never a
+      `question` string.
+    script: scripts/trajectory_planner.py
+    depends_on: [gather-inputs]
+    inputs:
+      - name: waypoints
+        type: object
+      - name: waypoint_times
+        type: object
+      - name: modes
+        type: object
+      - name: sample_rate
+        type: float
+      - name: max_iter
+        type: integer
+    outputs:
+      - name: trajectory_matrix
+        type: object
+        description: np.ndarray of shape (15, max_iter); rows 12:15 are the accelerations checked against the physical envelope.
+
+  - name: check-acceleration-limits
     description: >
-      Implement PID feedback on position and velocity errors. Compute
-      pos_err = current_pos − desired_pos and
-      vel_err = current_vel − desired_vel. Accumulate the integral term
-      via integral_e += pos_err * dt. Compute desired acceleration as
-      acc = desired_acc − kp * pos_err − ki * integral_e − kd * vel_err.
-      Compute thrust F = mass * (gravity + acc[2]). Return (F, acc).
-  - name: initialise-integral-state
+      Validate the planned trajectory against the drone's physical
+      acceleration envelope from `system_params.yaml`. Upward `az ≤
+      accel_limit_up` (≈ 6.962 m/s² for the default 0.77 kg drone),
+      downward `az ≥ -accel_limit_down` (≈ -9.429 m/s²), and
+      `√(ax²+ay²) ≤ accel_limit_horiz` (≈ 13.602 m/s²) at every
+      timestep. A violation means the motors would saturate; either
+      lengthen the segment time or split it into multiple waypoints
+      before proceeding. Numeric thresholds and the iteration over
+      timesteps are encoded in the script — do not eyeball the matrix.
+    script: scripts/check_acceleration_limits.py
+    depends_on: [plan-trajectory]
+    inputs:
+      - name: trajectory_matrix
+        type: object
+      - name: params
+        type: object
+    outputs:
+      - name: limits_ok
+        type: boolean
+      - name: limits_report
+        type: object
+        description: Per-axis max/min observed accelerations plus any per-timestep violations.
+
+  - name: save-planned-trajectory
     description: >
-      Before entering the control loop, call make_position_integral() to
-      produce a fresh {"e": zeros(3)} dict and pass it explicitly into the
-      controller on every step. Never declare the integral as a mutable
-      default argument — state would leak across calls.
-  - name: read-system-params
+      For each command file `<label>.txt`, create `/root/results/<label>/`
+      and save the planned matrix there as `planned_trajectory.npy`
+      immediately after planning. The test suite loads this file to
+      verify the acceleration envelope, so the save must happen before
+      simulation runs — not after. Other artifacts the surrounding
+      pipeline writes to the same folder include `metrics_3d.json`,
+      `tuning_results.json`, `actual_trajectory.npy`, and `plots/`.
+    depends_on: [check-acceleration-limits]
+    inputs:
+      - name: trajectory_matrix
+        type: object
+      - name: label
+        type: string
+        description: Command identifier (filename without extension, e.g. "001").
+    outputs:
+      - name: out_dir
+        type: string
+        description: Per-command output directory, e.g. /root/results/001.
+      - name: planned_trajectory_path
+        type: string
+
+  - name: init-position-integral
     description: >
-      Read dt = 1.0 / params['sample_rate'] from system_params.yaml, along
-      with mass, gravity, and motor thrust limits T_min / T_max. Derive
-      time_final = waypoint_times[-1] from the parsed flight plan. Never
-      hardcode dt or time_final.
+      Call `make_position_integral()` before the simulation loop to
+      allocate a fresh `{"e": zeros(3)}` accumulator. Allocate once per
+      run; pass it explicitly into every `position_controller(...)`
+      call. NEVER use a mutable default for this state — sharing it
+      across runs causes integral wind-up from previous runs to leak in.
+    script: scripts/position_controller.py
+    depends_on: [save-planned-trajectory]
+    outputs:
+      - name: integral_state
+        type: object
+        description: Mutable dict with key 'e' holding a zeros(3) accumulator.
+
+  - name: position-control-step
+    description: >
+      Inside the simulation loop, call `position_controller(current,
+      desired, params, integral, kp_pos=..., ki_pos=..., kd_pos=...)`
+      to get back `(F, acc)`. Internally it computes
+      `pos_err = current.pos - desired.pos`,
+      `vel_err = current.vel - desired.vel`,
+      `integral["e"] += pos_err * dt`,
+      `acc = desired.acc - kp*pos_err - ki*integral - kd*vel_err`,
+      `F = mass * (gravity + acc[2])`. Feed `acc` into the attitude
+      planner; feed `F` into the motor model.
+    script: scripts/position_controller.py
+    depends_on: [init-position-integral]
+    inputs:
+      - name: current_state
+        type: object
+        description: SimpleNamespace-like with .pos, .vel attributes for this timestep.
+      - name: desired_state
+        type: object
+        description: SimpleNamespace-like with .pos, .vel, .acc attributes from the trajectory matrix.
+      - name: params
+        type: object
+      - name: integral_state
+        type: object
+      - name: kp_pos
+        type: object
+        description: Length-3 per-axis proportional gains.
+      - name: ki_pos
+        type: object
+      - name: kd_pos
+        type: object
+    outputs:
+      - name: thrust
+        type: float
+        description: Total thrust F in Newtons, fed into the motor model.
+      - name: desired_acceleration
+        type: object
+        description: 3-vector handed to the attitude planner as desired_state.acc.
+
   - name: tune-gains
     description: >
-      No tuning range is provided — choose PID gains freely to best
-      satisfy the success criteria. Start small (e.g.
-      kp_pos = [0.1, 0.1, 0.1], ki_pos = [0, 0, 0], kd_pos = [0, 0, 0])
-      and increase gradually. Use the decisions table below to map
-      observed symptoms to gain adjustments.
-  - name: respect-acceleration-limits
-    description: >
-      Keep the planned trajectory's acceleration rows (12:15) within the
-      drone's physical limits at every timestep: upward az ≤ 6.962 m/s²
-      ((T_max − m·g) / m); downward az ≥ −9.429 m/s²
-      (−(m·g − T_min) / m); horizontal √(ax² + ay²) ≤ 13.602 m/s²
-      (√(T_max² − (m·g)²) / m). Exceeding any of these saturates the
-      motors and tracking will fail.
-  - name: save-outputs
-    description: >
-      For each command file (e.g. 001.txt) derive label from the filename
-      without extension, set out_dir = f'/root/results/{label}', and call
-      os.makedirs(out_dir, exist_ok=True). Immediately after
-      trajectory_planner() returns, save the (15 × max_iter) matrix with
-      np.save(os.path.join(out_dir, 'planned_trajectory.npy'),
-      trajectory_matrix) — the test suite reads this file to verify the
-      acceleration limits. Write metrics_3d.json containing
-      {mode, RiseTime, SettlingTime, Overshoot_pct, SteadyStateError},
-      tuning_results.json with the best PID gains from the sweep (same
-      content for every command), and plots/ containing
-      desired_vs_actual, errors, and cumulative_errors PNGs via
-      plot_quadrotor(actual, desired, time_vec, save_dir=os.path.join(out_dir, 'plots')).
+      No tuning range is fixed — choose gains freely to satisfy the
+      success criteria (per-timestep position error < 0.05 m, overshoot
+      < 5%, steady-state error < 0.05 m). Start conservative and raise
+      gradually. Symptom → fix table:
+      slow altitude response → increase kp_pos[2];
+      altitude overshoot → increase kd_pos[2];
+      persistent altitude offset → increase ki_pos[2];
+      x/y oscillation during hover → decrease ki_pos[0] and ki_pos[1].
+      The script defaults
+      (kp=[30,30,40], ki=[0.1,0.1,0.5], kd=[10,10,14]) are a known-good
+      starting point for the bundled 0.77 kg drone; record whatever
+      gains you end up using in `tuning_results.json`.
 
-decisions:
-  - signal: Slow altitude response.
-    action: Increase kp_pos[2].
-  - signal: Altitude overshoot.
-    action: Increase kd_pos[2].
-  - signal: Persistent altitude offset.
-    action: Increase ki_pos[2].
-  - signal: x/y oscillation during hover.
-    action: Decrease ki_pos[0] and ki_pos[1].
-  - signal: Planned trajectory acc rows exceed the physical acceleration limits.
-    action: Lengthen waypoint_times or smooth the segment so motors do not saturate; the trajectory must satisfy the upward, downward, and horizontal bounds at every timestep.
+modes:
+  - name: plan-only
+    body: >
+      Run `gather-inputs` → `plan-trajectory` →
+      `check-acceleration-limits` → `save-planned-trajectory`. Useful
+      for sweeping segment-time or waypoint choices before committing
+      to a full simulation.
+  - name: full-loop
+    body: >
+      Run all steps. The trajectory is planned and saved once per
+      command; `init-position-integral` and `position-control-step`
+      run inside the per-timestep simulation loop alongside the
+      attitude controller and motor model.
+
+scenarios:
+  - need: A 'takeoff to 5 m in 2 s' command must reach 5 m without per-timestep error spikes.
+    context: Default cubic spline (not clamped) leaves nonzero velocity at t=0 while the drone starts at rest, producing an initial 3 m/s mismatch and per-timestep error > 0.05 m.
+    action: The bundled `trajectory_planner` uses a clamped CubicSpline (zero velocity at both endpoints), so the planned start matches the drone's initial state.
+    outcome: Per-timestep position error stays under 0.05 m through the whole takeoff.
+  - need: A 'fly from (0,0,3) to (5,0,3) in 1 s' command — short horizontal segment.
+    context: The peak horizontal acceleration of a clamped cubic between two points is roughly 6 · |Δx| / T². For 5 m in 1 s that's ≈30 m/s², well above `accel_limit_horiz = 13.602 m/s²`.
+    action: The check-acceleration-limits step flags the violation. Lengthen the segment time (e.g. 2 s → ≈7.5 m/s², which fits) or split the path into multiple waypoints before re-planning.
+    outcome: The replanned trajectory passes the limits check and the motors don't saturate at run time.
+  - need: Persistent altitude steady-state error of ~0.04 m on hover.
+    action: Bump `ki_pos[2]` (e.g. 0.5 → 0.7). Re-run; if oscillation appears, back off slightly and raise `kd_pos[2]`.
+    outcome: Steady-state altitude error drops below the 0.05 m threshold without inducing overshoot.
+
+integrations:
+  - partner: flight-plan-parser
+    body: >
+      Consumes its (waypoints, waypoint_times, modes) output directly.
+      `time_final = waypoint_times[-1]`; never hardcode it.
+  - partner: attitude-controller-planner
+    body: >
+      The position controller's `acc` output becomes the attitude
+      planner's input. The attitude planner converts it into desired
+      roll/pitch and forwards yaw from the desired state.
+  - partner: motor-model-dynamics
+    body: >
+      Thrust `F` from the position controller, combined with the
+      attitude controller's moment `M`, feeds the motor model and
+      drone dynamics.
+  - partner: stepinfo-3d / plot-quadrotor
+    body: >
+      Consume the actual vs. desired trajectories produced by the
+      surrounding simulation loop to write `metrics_3d.json` and the
+      `plots/` directory under the same per-command output folder.
 
 anti_patterns:
-  - Using a mutable default argument for the position integral — always create it with make_position_integral() before the loop and pass it explicitly.
-  - Hardcoding dt instead of computing dt = 1.0 / params['sample_rate'] from system_params.yaml.
-  - Hardcoding time_final instead of deriving it from waypoint_times[-1] in the parsed flight plan.
-  - Passing a `question` argument to trajectory_planner — the planner only takes modes from the flight plan parser.
-  - Skipping or deferring the np.save of planned_trajectory.npy after calling trajectory_planner() — the test suite needs it to check acceleration limits.
-  - Writing outputs anywhere other than /root/results/<label>/ for each command file.
+  - Using a mutable default for the position-controller integral. Always call `make_position_integral()` before the loop and pass the dict explicitly — sharing the dict across runs leaks integral wind-up between commands.
+  - Hardcoding `dt` or `time_final`. Read `dt = 1.0 / params['sample_rate']` from `system_params.yaml` and `time_final = waypoint_times[-1]` from the parsed flight plan.
+  - Passing the natural-language `question` into `trajectory_planner`. The planner takes only `waypoints`, `max_iter`, `waypoint_times`, `sample_rate`, and `modes` — the flight-plan parser is what consumes the prompt text.
+  - Skipping the save of `planned_trajectory.npy` (or saving it after simulation). The verifier loads this file to check the physical acceleration envelope; save it immediately after `trajectory_planner` returns.
+  - Eyeballing the acceleration matrix to judge whether limits hold. Run `scripts/check_acceleration_limits.py` (or the equivalent `check_limits` function) — limit values are derived from `system_params.yaml`, not hardcoded.
+  - Reusing a single `/root/results/` for every command. Each command writes into `/root/results/<label>/` with its own `planned_trajectory.npy`, `metrics_3d.json`, `tuning_results.json`, `actual_trajectory.npy`, and `plots/`.
+  - Cranking `ki_pos[0]` / `ki_pos[1]` during hover tuning. Horizontal integral gain causes x/y oscillation around the hover point; reduce it instead.
 ```
