@@ -68,13 +68,34 @@ aip-skillbench eval    --task 3d-scan-calc --model claude-haiku-4-5 --mode aip-f
 aip-skillbench convert --task 3d-scan-calc --from curated
 aip-skillbench eval    --task 3d-scan-calc --model claude-haiku-4-5 --mode aip-from-curated
 
+# Author modes 4 & 5 in bulk — parallel claude -p calls, skips already-done outputs.
+aip-skillbench batch-convert --task 3d-scan-calc --task earthquake-phase-association \
+                             --from both --concurrency 4
+# Or convert all 95 tasks at once (default pattern is "*"):
+aip-skillbench batch-convert --from both --concurrency 4
+
 # Inspect results
 aip-skillbench reward jobs/3d-scan-calc-aip-from-curated-claude-haiku-4-5/<timestamp>/
 ```
 
 See [skill-modes.md](skill-modes.md) for each mode's authoring input, container mount paths, audit signals, and reference runs.
 
-To sweep many `(task × model × mode × trial)` combinations concurrently with live progress, see [run-matrix.md](run-matrix.md).
+To sweep many `(task × model × mode × trial)` combinations concurrently with live progress, see [run-matrix.md](run-matrix.md). To regenerate the AIP skill cohort against a new spec version, see [scripts/regenerate-aip-cohort.md](scripts/regenerate-aip-cohort.md).
+
+### `batch-convert` flags
+
+| flag | default | notes |
+|---|---|---|
+| `--task` (repeatable) | — | Task name(s). Required unless `--pattern` is given. |
+| `--pattern` | `*` | Glob filter on task names. Ignored if any `--task` is set. |
+| `--from` | `both` | `instruction`, `curated`, or `both` (= 2× authoring calls per task). |
+| `--concurrency` / `-j` | 4 | Parallel `claude -p` calls. Real ceiling is the Anthropic per-org rate limit for `claude-opus-4-7`. |
+| `--force` | off | Re-author even if `generated-skills/<task>/aip-from-*/` already populated. |
+| `--limit` | 0 | Cap number of conversions (0 = no limit). Useful for cost-bounded smoke tests. |
+| `--yes` / `-y` | off | Skip the 5-second confirm pause. |
+| `--author-model` | `claude-opus-4-7` | Opus per AIP guidance; override only for experiments. |
+
+Cost rule of thumb: ~$0.30–1 per conversion (one task × one `--from` side). 16 tasks × `--from both` = ~$10–25.
 
 ## Agents & models
 
@@ -91,4 +112,6 @@ Each agent reads its own API key from `.env` (`ANTHROPIC_API_KEY`, `OPENAI_API_K
 ## Known limitations
 
 - **AIP authoring is Anthropic-only.** `aip-skillbench convert` (modes 4 & 5) shells out to Claude Code (`claude -p`) and defaults to `claude-opus-4-7` per AIP guidance. Authoring with OpenAI / Google models would require an adapter that mounts the AIP skill in those harnesses' prompt format. Solver evaluation is not restricted — see above.
+
+- **Mode 5 (`aip-from-curated`) converts each curated skill in isolation, 1:1.** `_convert_from_curated` loops over every skill dir under the task's `environment/skills/` and makes a *separate* `claude -p` call per skill (`cli.py`), so a task with N human-authored skills always yields exactly N AIP skills with the same names. Each conversion is blind to the others, so the authoring model **cannot consolidate** a fragmented skill set (e.g. earthquake-phase-association's 4 seismology skills stay 4). This is a hard property of the per-skill loop, independent of the conversion prompt or the AIP skill's own guidance. Mode 4 (`aip-from-instruction`) has no such constraint — it gets one call and chooses its own skill count. To allow mode-5 consolidation you'd change the loop to pass all skill dirs into a single call.
 

@@ -173,25 +173,25 @@ Skill at:
 
     {src}
 
-into an AIP-compliant skill at:
+into an AIP skill at:
 
     {dst}
 
 Requirements:
-1. Read {src}/SKILL.md. Produce {dst}/SKILL.md in AIP format per the aip
-   skill's specification (schema-validated YAML body, AIP frontmatter).
-2. Copy every other file under {src}/ (scripts/, references/, assets/, etc.)
-   verbatim into {dst}/, preserving the directory structure.
+1. Read {src}/SKILL.md. Produce {dst}/SKILL.md in AIP format.
+2. Read every other file under {src}/ (scripts/, references/, assets/, etc.) for context.
+    Create scripts to mirror, copy verbatim into {dst}/, or alter as needed.
 3. Do not change the skill's `name:` frontmatter field — the task's mounted
    skill name must match.
-4. Validate the result against the AIP schema before writing.
+4. The skills you author should have all the specialized knowledge and procedures an agent needs to solve this
+   task type autonomously.
 
 Write nothing outside {dst}/. Do not modify {src}/."""
 
 
 _PROMPT_FROM_INSTRUCTION = """\
 Use the `aip` skill in ./.claude/skills/aip/ to author one or more
-AIP-compliant Agent Skills that would help a downstream agent solve the
+AIP Agent Skills so a downstream agent can solve the
 task described in:
 
     {instruction_path}
@@ -201,17 +201,12 @@ Write the skill pack(s) into:
     {dst_root}/<skill-name>/SKILL.md (plus scripts/, references/, assets/ as needed)
 
 Requirements:
-1. Read ONLY {instruction_path}. Do not inspect or copy from any existing
-   skills directory under the task — this mode authors from the
-   instruction alone, not from a human-written skill.
-2. Author the reusable procedural knowledge an agent needs to solve this
-   task type. Pick concise `<skill-name>` value(s); the directory name
+1. Read ONLY {instruction_path}. DO NOT inspect or copy from any existing
+   skills directory under the task — you must author from the
+   instruction alone. 
+2. The skills you author should have all the specialized knowledge and procedures an agent needs to solve this
+   task type autonomously. Pick concise `<skill-name>` value(s); the directory name
    under {dst_root}/ must match the skill's `name:` frontmatter.
-3. Include any scripts or assets that would help the solver — this skill
-   is the only thing the solver will have, besides the task environment.
-4. Every produced SKILL.md must validate against the AIP schema. Run
-   `uv run .claude/skills/aip/scripts/validate.py <skill-dir>` before
-   considering the work complete.
 
 Write nothing outside {dst_root}/. Do not modify the task source."""
 
@@ -236,7 +231,8 @@ def convert(
 
     `--from curated` — convert each skill under
     `vendor/skillsbench/tasks/<task>/environment/skills/` to AIP, preserving
-    names and copying scripts verbatim. Output: `generated-skills/<task>/aip-from-curated/<skill>/`.
+    names; supporting files (scripts/references) are reproduced, mirrored, or
+    adapted as the authoring model sees fit. Output: `generated-skills/<task>/aip-from-curated/<skill>/`.
 
     `--from instruction` — author one or more AIP skills from
     `vendor/skillsbench/tasks/<task>/instruction.md` alone. Output:

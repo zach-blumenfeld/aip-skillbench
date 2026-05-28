@@ -117,7 +117,7 @@ Comparison to mode-5 reference run on the same (task, model): both pass; mode-4 
 
 ## Mode 5 — `aip-from-curated`
 
-Opus 4.7 takes the existing human-curated skill and converts it to an AIP-compliant skill: schema-validated YAML body, `metadata.aip.{spec,schemaId}` frontmatter, preserved `name:`, scripts copied verbatim. Locked, committed, mounted into every trial.
+Opus 4.7 takes the existing human-curated skill and converts it to an AIP-compliant skill: schema-validated YAML body, `metadata.aip.{spec,schemaId}` frontmatter, preserved `name:`, supporting files (scripts/references) reproduced, mirrored, or adapted as the authoring model sees fit. Locked, committed, mounted into every trial.
 
 ### How to run
 
@@ -141,7 +141,7 @@ Host (committed in this repo):
 generated-skills/3d-scan-calc/aip-from-curated/
 └── mesh-analysis/
     ├── SKILL.md                       # AIP frontmatter + fenced YAML body
-    ├── scripts/mesh_tool.py           # verbatim copy from the curated skill
+    ├── scripts/mesh_tool.py           # carried over from the curated skill (copied, mirrored, or adapted)
     └── source/
         ├── ORIGINAL_SKILL.md          # the human-written original, preserved
         └── procedure.schema.json      # AIP schema the YAML body validates against
