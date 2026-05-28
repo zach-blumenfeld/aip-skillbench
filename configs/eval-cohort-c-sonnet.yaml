@@ -1,0 +1,21 @@
+# Cohort C — balanced stratified slice (all 6 structure×impl cells, 3 hard each).
+# Human vs AIP-from-curated only; combine with cohorts A/B + the eval-3med run in analysis.
+# Requires aip-from-curated packs for all 8 tasks (batch-convert --from curated first).
+tasks:
+  - parallel-tfidf-search
+  - enterprise-information-search
+  - exoplanet-detection-period
+  - jax-computing-basics
+  - dapt-intrusion-detection
+  - court-form-filling
+  - dialogue-parser
+  - sec-financial-report
+models:
+  - claude-sonnet-4-6
+modes:
+  - human-curated
+  - aip-from-curated
+trials: 10
+concurrency: 6
+agent: claude-agent-acp
+sandbox: docker

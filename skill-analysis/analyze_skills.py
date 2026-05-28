@@ -67,11 +67,35 @@ def classify(path: Path, skill_root: Path) -> str:
     return "asset"
 
 
+HEAVY_TYPES = {"implementation", "simulation", "optimization", "control"}
+
+
+def dir_code_stats(d: Path) -> tuple[int, int]:
+    """Return (total_files, code_loc) for a task dir like tests/ or solution/.
+
+    code_loc counts only executable-extension files (verifier/solution logic),
+    so data fixtures don't inflate the implementation-complexity proxy.
+    """
+    if not d.exists():
+        return 0, 0
+    files = [p for p in d.rglob("*") if p.is_file()]
+    code_loc = sum(line_count(p) for p in files if p.suffix.lower() in SCRIPT_EXT)
+    return len(files), code_loc
+
+
 def profile_task(task_dir: Path) -> dict:
-    meta = {}
+    toml = {}
     toml_path = task_dir / "task.toml"
     if toml_path.exists():
-        meta = tomllib.load(open(toml_path, "rb")).get("metadata", {})
+        toml = tomllib.load(open(toml_path, "rb"))
+    meta = toml.get("metadata", {})
+    agent_timeout = toml.get("agent", {}).get("timeout_sec", "")
+    task_type = meta.get("task_type", []) or []
+    if not isinstance(task_type, list):
+        task_type = [task_type]
+    impl_class = "heavy" if HEAVY_TYPES & set(task_type) else "light"
+    test_files, test_loc = dir_code_stats(task_dir / "tests")
+    sol_files, sol_loc = dir_code_stats(task_dir / "solution")
 
     skills_root = task_dir / "environment" / "skills"
     skill_dirs = (
@@ -142,6 +166,12 @@ def profile_task(task_dir: Path) -> dict:
         "prose_to_code_ratio": round(prose_loc / m["script_loc"], 2) if m["script_loc"] else "",
         "total_files": m["total_files"],
         "total_kb": round(m["total_bytes"] / 1024, 1),
+        "task_type": ";".join(task_type),
+        "impl_class": impl_class,
+        "agent_timeout_sec": agent_timeout,
+        "test_loc": test_loc,
+        "test_files": test_files,
+        "solution_loc": sol_loc,
         "description": first_sentence(task_dir),
     }
 
@@ -151,7 +181,9 @@ def main() -> None:
     cols = [
         "task", "difficulty", "category", "structure_class", "n_skills", "skill_names",
         "skill_md_loc", "n_scripts", "script_loc", "n_refs", "ref_loc", "n_assets",
-        "prose_loc", "prose_to_code_ratio", "total_files", "total_kb", "description",
+        "prose_loc", "prose_to_code_ratio", "total_files", "total_kb",
+        "task_type", "impl_class", "agent_timeout_sec", "test_loc", "test_files",
+        "solution_loc", "description",
     ]
     with open(OUT, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=cols)

@@ -1,0 +1,21 @@
+# Cohort A — balanced stratified slice (all 6 structure×impl cells, 3 hard each).
+# Human vs AIP-from-curated only; combine with cohorts B/C + the eval-3med run in analysis.
+# Requires aip-from-curated packs for all 8 tasks (batch-convert --from curated first).
+tasks:
+  - energy-unit-commitment
+  - adaptive-cruise-control
+  - spring-boot-jakarta-migration
+  - offer-letter-generator
+  - suricata-custom-exfil
+  - powerlifting-coef-calc
+  - civ6-adjacency-optimizer
+  - travel-planning
+models:
+  - claude-sonnet-4-6
+modes:
+  - human-curated
+  - aip-from-curated
+trials: 10
+concurrency: 6
+agent: claude-agent-acp
+sandbox: docker
