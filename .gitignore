@@ -17,6 +17,8 @@ build/
 # Run outputs — keep `jobs/` empty in git
 jobs/*
 !jobs/.gitkeep
+prompts/
+reports/
 
 # Campaign outputs from `aip-skillbench run-matrix`
 runs/

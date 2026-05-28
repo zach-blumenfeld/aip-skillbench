@@ -1,0 +1,17 @@
+tasks:
+  - civ6-adjacency-optimizer
+  - court-form-filling
+  - crystallographic-wyckoff-position-analysis
+  - dapt-intrusion-detection
+  - dialogue-parser
+  - drone-planning-control
+  - earthquake-plate-calculation
+  - energy-market-pricing
+  - exoplanet-detection-period
+  - financial-modeling-qa
+models:
+  - claude-haiku-4-5-20251001
+trials: 5
+concurrency: 4
+agent: claude-agent-acp
+sandbox: docker

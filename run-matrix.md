@@ -211,7 +211,7 @@ cp runs/<campaign>/summary.csv   runs/<campaign>/summary.csv.bak
 # 2. Strip error rows from the resume index.
 python3 -c "
 from pathlib import Path
-p = Path('runs/<campaign>/summary.jsonl')
+p = Path('runs/eval-1-haiku/summary.jsonl')
 kept = [l for l in p.read_text().splitlines()
         if l.strip() and '\"status\": \"error\"' not in l]
 p.write_text('\n'.join(kept) + '\n')
@@ -222,7 +222,7 @@ print(f'kept {len(kept)} non-error rows')
 python3 -c "
 import csv
 from pathlib import Path
-p = Path('runs/<campaign>/summary.csv')
+p = Path('runs/eval-1-haiku/summary.csv')
 rows = list(csv.DictReader(p.open()))
 keep = [r for r in rows if r['status'] != 'error']
 with p.open('w', newline='') as f:
@@ -233,7 +233,7 @@ print(f'kept {len(keep)} rows')
 "
 
 # 4. Re-run the original command — resume picks up exactly the gaps.
-uv run aip-skillbench run-matrix --config <same-config> --out runs/<campaign> --yes
+uv run aip-skillbench run-matrix --config configs/eval-1-haiku.yaml --out runs/eval-1-haiku --yes
 ```
 
 If the original run is still in flight when you discover the issue, you have two options: wait for it to finish (cleaner; the in-flight cells finish recording first), or `Ctrl-C` to stop now and recover both the recorded errors and the four in-flight slots in one pass.
