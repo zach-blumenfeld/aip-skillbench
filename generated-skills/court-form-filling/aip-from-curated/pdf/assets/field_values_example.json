@@ -1,0 +1,14 @@
+[
+  {
+    "field_id": "last_name",
+    "description": "The user's last name",
+    "page": 1,
+    "value": "Simpson"
+  },
+  {
+    "field_id": "Checkbox12",
+    "description": "Checkbox to be checked if the user is 18 or over",
+    "page": 1,
+    "value": "/On"
+  }
+]
