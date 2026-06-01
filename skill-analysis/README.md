@@ -2,6 +2,8 @@
 
 Profiles the **structure of every task's human-curated skill set** to support the *human-curated vs AIP-from-curated* study. Both modes carry the same domain knowledge — AIP just repackages it — so the question isn't "does AIP add knowledge" but "**does AIP-formatting the same human knowledge make an agent more successful, faster, and more consistent — and when does it help most?**"
 
+> **Scope:** this folder holds only the **run-independent** structural profiler (`analyze_skills.py` → `skill-metrics.csv`), which is reproducible from the skill files alone. The **run-dependent analysis** — the correlation notebooks (`skill_correlations.ipynb`, `results_vs_metrics.ipynb`), their rendered reports, and `RESEARCH-PLAN.md`, all of which read specific eval-run outputs — lives in the separate **[`random-research`](https://github.com/zach-blumenfeld/random-research)** repo under `aip-skill-analysis/`.
+
 The working hypothesis from the eval-3med deep dives: **AIP's benefit scales with how unstructured the human skill is.**
 - `drone-planning-control` — human skill was **prose-only (0 scripts)**; AIP added executable scripts → large gain (5/5 @ 734 s vs 2/5 @ 1279 s).
 - `crystallographic-wyckoff` — human skill had scripts but **~6,400 lines of prose/reference**; AIP compressed + structured it → consistency gain (±1.5 s vs a 138–255 s spread).
