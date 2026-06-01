@@ -2,6 +2,16 @@
 
 This repo extends [SkillsBench](https://www.skillsbench.ai) ([repo](https://github.com/benchflow-ai/skillsbench), [paper](https://www.skillsbench.ai/skillsbench.pdf)) to evaluate [AIP-formatted skills](https://github.com/zach-blumenfeld/aip).
 
+## Paper & evaluation data
+
+Raw run data for our papers are published as HuggingFace datasets. Each dataset's card explains the runs and links the exact repo tag to check out the AIP-compiled skills used; the analysis itself is in the paper.
+
+| Paper | Evaluation data                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+|---|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **AIP: A Graph Representation for Learning and Governing Agent Skills** | **For the paper:** [24-task stratified core](https://huggingface.co/datasets/neo4j/aip-skillbench-24task-sonnet-aipv0_3a3) (`aipv0.3a3`) · [3-task medium reference set](https://huggingface.co/datasets/neo4j/aip-skillbench-3med-sonnet-aipv0_3a2) (`aipv0.3a2`).<br>**Additionally**, the earlier (`aipv0.3a2`) [16-task stratified run](https://huggingface.co/datasets/neo4j/aip-skillbench-cohort-ab-sonnet-aipv0_3a2) that drove version bump and surfaced AIP agent self-improvement potential. |
+
+
+## Overview
 SkillsBench is a containerized benchmark — 84+ tasks across 11 domains, run via the [BenchFlow SDK](https://github.com/benchflow-ai/benchflow) — that measures agent pass rate under three skill conditions: 
 
 1. **no skills** (mode 1), 
