@@ -35,6 +35,7 @@ dev = [
     "ipykernel>=7.2.0",
     "jupyterlab>=4.5.7",
     "matplotlib>=3.10.9",
+    "neo4j>=6.2.0",
     "pandas>=3.0.3",
     "scipy>=1.17.1",
     "seaborn>=0.13.2",
