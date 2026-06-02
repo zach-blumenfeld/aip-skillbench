@@ -1,0 +1,40 @@
+# 24-task stratified core (cohorts A+B+C) — GPT-5.4 solver.
+# Human vs AIP-from-curated, reusing the committed v0.3a3 aip-from-curated packs
+# (author-once / consume-many — no re-conversion needed for a new solver).
+tasks:
+  # cohort A
+  - energy-unit-commitment
+  - adaptive-cruise-control
+  - spring-boot-jakarta-migration
+  - offer-letter-generator
+  - suricata-custom-exfil
+  - powerlifting-coef-calc
+  - civ6-adjacency-optimizer
+  - travel-planning
+  # cohort B
+  - mars-clouds-clustering
+  - bike-rebalance
+  - fix-build-google-auto
+  - energy-market-pricing
+  - grid-dispatch-operator
+  - protein-expression-analysis
+  - data-to-d3
+  - 3d-scan-calc
+  # cohort C
+  - parallel-tfidf-search
+  - enterprise-information-search
+  - exoplanet-detection-period
+  - jax-computing-basics
+  - dapt-intrusion-detection
+  - court-form-filling
+  - dialogue-parser
+  - sec-financial-report
+models:
+  - gpt-5.4            # if codex-acp rejects this, try gpt-5.4-codex
+modes:
+  - human-curated
+  - aip-from-curated
+trials: 5
+concurrency: 10
+agent: codex-acp       # OpenAI solver — needs OPENAI_API_KEY in .env
+sandbox: docker
