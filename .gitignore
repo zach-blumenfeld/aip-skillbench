@@ -31,3 +31,11 @@ runs/
 .claude/
 
 # uv lock kept in repo for reproducibility; do NOT add uv.lock here.
+
+# Secret-scan reports from scripts/hf_upload.py (masked, but local-only)
+.secret-scan/
+
+.obsidian/
+
+# Local incident runbooks / scratch notes
+scratch/

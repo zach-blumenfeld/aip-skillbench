@@ -1,113 +1,117 @@
 # Upload a run-matrix campaign to HuggingFace
 
-Reference for archiving an eval campaign as a private HuggingFace dataset, bundled with the campaign report and the repo README. Copy commands one block at a time — don't run the whole file blind.
+Use `scripts/hf_upload.py`. It stages nothing, scans everything it would ship for
+credentials, and refuses to upload if it finds any.
 
-## Fill these in
-
-```bash
-ORG=neo4j                       # your company HF org slug
-CAMPAIGN=eval-1-haiku                     # dir name under runs/
-DATASET=experiment-aip-skillbench-${CAMPAIGN}   # repo name under the org
-```
-
-## One-time prerequisites
-
-Only do once per machine:
+## One-time setup
 
 ```bash
 uv add huggingface_hub --dev
-uv run hf auth login
-# paste a Write-scoped token from https://huggingface.co/settings/tokens
+uv run hf auth login    # paste a Write-scoped token from https://huggingface.co/settings/tokens
 ```
 
-## 1. Stage a copy of the campaign
-
-Working off a copy keeps the original `runs/<campaign>/` intact. Run from the repo root.
+## Upload
 
 ```bash
-STAGING=runs/_hf-staging-${CAMPAIGN}
-
-rm -rf "$STAGING"
-cp -R runs/${CAMPAIGN} "$STAGING"
+uv run python scripts/hf_upload.py --campaign eval-1-haiku --dry-run   # scan only
+uv run python scripts/hf_upload.py --campaign eval-1-haiku             # scan, then upload
 ```
 
-## 2. Bundle the report and README
+Defaults: private repo named `neo4j/experiment-aip-skillbench-<campaign>`, with
+`reports/<campaign>.md` as the dataset card. Override with `--org`, `--dataset`, `--public`.
+It also uploads the repo README as `REPO-README.md`.
 
-The eval report becomes the HuggingFace dataset card (HF renders `README.md` as the landing page). The repo-level README goes alongside for broader project context.
+Exit codes: `0` clean, `1` findings need review, `2` bad usage — safe to wire into CI.
 
-```bash
-cp reports/${CAMPAIGN}.md "$STAGING/README.md"
-cp README.md             "$STAGING/REPO-README.md"
-```
+**Agent trajectories (`acp_trajectory.jsonl`) are uploaded** — they are research data.
+Safety comes from the scan, not from withholding them. Pass `--exclude-trajectories` to
+drop them. Video and `install-stdout.txt` artifacts are always excluded as bulky and
+recreatable.
 
-## 3. (Optional) strip large recreatable artifacts
+## When it blocks
 
-Cuts ~600 MB of `compressed_video.mp4` outputs from `video-silence-remover` cells. Skip if you want the full record uploaded.
+You get the file, line number, pattern name, and a masked value for every finding, plus a
+report at `.secret-scan/<campaign>.txt` (gitignored). Every context window in that report is
+sanitized, so reading it cannot re-expose a secret.
 
-```bash
-find "$STAGING/cells" -name "compressed_video.mp4" -delete 2>/dev/null
-find "$STAGING/cells" -name "install-stdout.txt"   -delete 2>/dev/null
+Then pick one:
 
-du -sh "$STAGING"      # sanity check
-```
+1. **False positive** — tighten `SECRET_PATTERNS` in the script.
+2. **Real credential** — **revoke it first**, then redact in place
+   (`scratch/redact-leaked-key.md`) and re-run. Redaction keeps trajectories analytically
+   whole: the secret becomes `[REDACTED_ANTHROPIC_API_KEY]` and nothing else changes.
+3. **Traces you don't need** — re-run with `--exclude-trajectories`.
 
-## 4. Create the private dataset repo
+Never bypass by deleting the check.
 
-One-time per campaign. Errors harmlessly if the repo already exists.
+## Tuning the patterns
 
-```bash
-uv run hf repos create "$ORG/$DATASET" --repo-type dataset --private
-```
+`SECRET_PATTERNS` is calibrated against the whole corpus: it catches the 2026-09-02
+`civ6-adjacency-optimizer` leak with zero false positives across ~1,100 trajectory files in
+four clean campaigns. Preserve these two if you edit it:
 
-(The new `hf` CLI takes the full `org/name` as a single argument — there's no separate `--organization` flag any more. `hf repo` still works but is deprecated in favor of `hf repos`.)
+- The generic rule matches `API_KEY=`, **not** `_KEY=`. `GPG_KEY=` is a public signing
+  fingerprint present in every env dump and would otherwise fire constantly.
+- `hf_` requires 30+ following chars. A bare `hf_` substring matches ordinary identifiers
+  like `hf_hub_download` and `hf_with_ppo` — that produced 46 spurious hits during triage.
 
-## 5. Upload
+## Background: why the gate exists
 
-```bash
-uv run hf upload "$ORG/$DATASET" "$STAGING" . \
-  --repo-type dataset \
-  --commit-message "Upload $CAMPAIGN ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
-```
+On 2026-09-02 the `civ6-adjacency-optimizer` task shelled out to `env`, capturing the
+container environment — including a live `ANTHROPIC_API_KEY` — into its console output and
+from there into `acp_trajectory.jsonl`. The key was published in two public datasets and
+drained before discovery. Console capture is unbounded by design, so trajectories cannot be
+assumed safe without inspection. See `scratch/` for the incident runbooks.
 
-> If you skipped step 4, add `--private` here — `hf upload --private` auto-creates the repo as private when it doesn't yet exist (ignored if it already does).
-
-## 6. Cleanup the staging dir
-
-```bash
-rm -rf "$STAGING"
-```
+One trap worth knowing if you ever scan by hand: inside a Claude Code session `grep` is a
+shell function that honors `.gitignore`, and `runs/` is gitignored — a bare `grep` scans
+*nothing* and reports a false all-clear. Use `find … -print0 | xargs -0 /usr/bin/grep`.
+This masked the original leak during triage.
 
 ## Browse
 
 ```
-https://huggingface.co/datasets/$ORG/$DATASET
+https://huggingface.co/datasets/<org>/<dataset>
 ```
-
----
 
 ## How colleagues download
 
-They each need to be a member of `$ORG` with at least `read` access and have run `hf auth login` once on their machine.
+They need membership in the org with at least `read` access, and `hf auth login` once.
 
 ```bash
-hf download $ORG/$DATASET \
-  --repo-type dataset --local-dir ./$CAMPAIGN
+hf download neo4j/experiment-aip-skillbench-eval-1-haiku \
+  --repo-type dataset --local-dir ./eval-1-haiku
 ```
-
-In Python:
 
 ```python
 from huggingface_hub import snapshot_download
-snapshot_download(
-    repo_id="$ORG/$DATASET",
-    repo_type="dataset",
-    local_dir="./$CAMPAIGN",
-)
+snapshot_download(repo_id="neo4j/experiment-aip-skillbench-eval-1-haiku",
+                  repo_type="dataset", local_dir="./eval-1-haiku")
 ```
 
 Direct read of `summary.csv` without downloading:
 
 ```python
 import pandas as pd
-df = pd.read_csv("hf://datasets/$ORG/$DATASET/summary.csv")
+df = pd.read_csv("hf://datasets/neo4j/experiment-aip-skillbench-eval-1-haiku/summary.csv")
 ```
+
+## Manual upload (fallback only)
+
+For a partial or one-off upload the script doesn't cover. **Run the gate first** —
+`--dry-run` on the campaign — then:
+
+```bash
+ORG=neo4j; CAMPAIGN=eval-1-haiku; DATASET=experiment-aip-skillbench-${CAMPAIGN}
+
+uv run hf upload "$ORG/$DATASET" "runs/$CAMPAIGN" . \
+  --repo-type dataset --private \
+  --exclude "**/compressed_video.mp4" --exclude "**/install-stdout.txt" \
+  --commit-message "Upload $CAMPAIGN"
+
+uv run hf upload "$ORG/$DATASET" "reports/${CAMPAIGN}.md" README.md --repo-type dataset
+```
+
+`hf upload --private` auto-creates the repo if it doesn't exist. `--exclude` takes globs,
+not regex, and is a **repeatable flag** — one pattern per `--exclude`. Two globs after a
+single flag would be parsed as a positional argument, not a second pattern.
