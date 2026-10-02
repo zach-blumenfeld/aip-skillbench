@@ -45,8 +45,11 @@ aip-skillbench/
 ├── generated-skills/              # AIP authoring outputs for modes 4 & 5 (committed)
 ├── jobs/                          # bench run outputs (gitignored)
 ├── vendor/skillsbench/            # submodule of benchflow-ai/skillsbench (read-only)
+├── build/aip/                     # aip wheel built by `bootstrap`, installed into trial containers (gitignored)
 └── .claude/skills/aip/            # cloned by `bootstrap` (gitignored)
 ```
+
+`generated-skills/AIP_REF.json` records the AIP remote, ref, commit, and format version the cohort was authored against; `bootstrap` writes it and it is committed with the cohort.
 
 `vendor/` and `.claude/` are read-only — never write into them. Mode 4 & 5 conversion artifacts go to `generated-skills/<task>/aip-from-{instruction,curated}/<skill>/`.
 
@@ -56,12 +59,51 @@ aip-skillbench/
 git clone --recurse-submodules git@github.com:zach-blumenfeld/aip-skillbench.git
 cd aip-skillbench
 uv sync
-aip-skillbench bootstrap            # clones AIP into ./.claude/skills/aip
+aip-skillbench bootstrap            # clones AIP (0.4a0, branch aip-s1) into ./.claude/skills/aip,
+                                    # installs the host `aip` CLI, builds build/aip/*.whl,
+                                    # writes generated-skills/AIP_REF.json
 cp .env.example .env                # fill in ANTHROPIC_API_KEY
 aip-skillbench --help
 ```
 
-To update AIP later: `aip-skillbench bootstrap --force`.
+To update AIP later: `aip-skillbench bootstrap --force [--aip-ref <branch|tag>] [--aip-sha <commit>]`.
+`--aip-sha` reproduces an exact cohort from `generated-skills/AIP_REF.json` after the branch has moved.
+
+### AIP 0.4a0 and the protocol client
+
+AIP 0.4a0 skills carry a runtime block that tells the agent to drive the procedure
+with `aip run` when the CLI is present, and to execute the graph itself otherwise.
+In AIP modes, `eval` therefore installs the `aip` wheel into every trial container's
+system Python before the agent starts (see `aip_skillbench/_benchflow_patch.py`); the
+agent then runs the procedure through the protocol client, and execution-step scripts
+see the task image's preinstalled packages. Pass `--no-install-aip` to measure the
+agent-executes-the-graph fallback instead. Decision steps are answered by the agent
+at each pause unless `--decision-model` forwards `TYPESAFE_API_KEY` from `.env`, in
+which case the System One model answers and only low-confidence answers pause.
+Haiku-class solvers tend to skip the runtime block's "use `aip run` if available"
+and execute the graph by hand; `--aip-nudge` seeds a `~/.claude/CLAUDE.md` memory in
+the sandbox telling the solver to drive AIP skills through the client (`run-matrix`
+config key `aip_nudge`). All three switches are experimental conditions: record them
+with the run.
+
+`eval` and `run-matrix` refuse packs that do not validate against the bootstrapped
+AIP format, so a cohort authored against an older format must be regenerated
+(`convert --force`) after a bump.
+
+### Sandboxed authoring
+
+`convert` runs the authoring session in a throwaway workspace under `build/authoring/`
+that contains only the aip skill, `./inputs/` (the curated skills and the task
+Dockerfile, or `instruction.md`), and an empty `./out/`. No `--add-dir` is granted and
+the prompt names only workspace-relative paths, so the task's `tests/` and
+`solution/` are not in view. The session still runs with permissions skipped (it has
+to execute `aip` and the scripts it writes), so enforcement is by audit: the full
+stream-json transcript is scanned and any tool call whose path fields reach outside
+the workspace (or mention `vendor/skillsbench`, `tests/`, `solution/`) fails the
+conversion. Prompt, transcript, `audit.json`, and `meta.json` (model, cost, aip
+commit) are kept in `generated-skills/<task>/_authoring/<from>/<label>/`, a sibling of
+the mounted pack dir, so trials never see them and reviewers can check what the
+author read.
 
 ## Commands
 
@@ -75,8 +117,10 @@ aip-skillbench eval --task 3d-scan-calc --model claude-haiku-4-5 --mode selfgen-
 aip-skillbench convert --task 3d-scan-calc --from instruction
 aip-skillbench eval    --task 3d-scan-calc --model claude-haiku-4-5 --mode aip-from-instruction
 
-aip-skillbench convert --task 3d-scan-calc --from curated
+aip-skillbench convert --task 3d-scan-calc --from curated            # one AIP skill per curated skill
+aip-skillbench convert --task 3d-scan-calc --from curated --single   # all curated skills -> one procedure
 aip-skillbench eval    --task 3d-scan-calc --model claude-haiku-4-5 --mode aip-from-curated
+aip-skillbench eval    --task 3d-scan-calc --model claude-haiku-4-5 --mode aip-from-curated --decision-model
 
 # Author modes 4 & 5 in bulk — parallel claude -p calls, skips already-done outputs.
 aip-skillbench batch-convert --task 3d-scan-calc --task earthquake-phase-association \
@@ -104,6 +148,7 @@ To sweep many `(task × model × mode × trial)` combinations concurrently with 
 | `--limit` | 0 | Cap number of conversions (0 = no limit). Useful for cost-bounded smoke tests. |
 | `--yes` / `-y` | off | Skip the 5-second confirm pause. |
 | `--author-model` | `claude-opus-4-7` | Opus per AIP guidance; override only for experiments. |
+| `--single` | off | Curated side: compile all of a task's curated skills into one AIP procedure instead of one per skill. |
 
 Cost rule of thumb: ~$0.30–1 per conversion (one task × one `--from` side). 16 tasks × `--from both` = ~$10–25.
 

@@ -2,22 +2,34 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import typer
 
-ROOT = Path(__file__).resolve().parents[1]
+from aip_skillbench._aip import (
+    AIP_BUILD_DIR,
+    AIP_DEFAULT_REF,
+    AIP_DIR,
+    AIP_REF_FILE,
+    AIP_REMOTE,
+    GENERATED_SKILLS,
+    NUDGE_ENV,
+    ROOT,
+    WHEEL_ENV,
+    aip_wheel,
+    format_version,
+    validate_packs,
+)
+
 VENDOR_SKILLSBENCH = ROOT / "vendor" / "skillsbench"
 VENDOR_SKILL_CREATOR = VENDOR_SKILLSBENCH / ".agents" / "skills" / "skill-creator"
-AIP_DIR = ROOT / ".claude" / "skills" / "aip"
-AIP_REMOTE = "git@github.com:zach-blumenfeld/aip.git"
-GENERATED_SKILLS = ROOT / "generated-skills"
 JOBS_DIR = ROOT / "jobs"
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
@@ -68,7 +80,7 @@ def _require_skill_creator() -> Path:
     return VENDOR_SKILL_CREATOR
 
 
-def _bench(*args: str) -> int:
+def _bench(*args: str, env: dict[str, str] | None = None) -> int:
     """Invoke benchflow's `bench` CLI via our patched launcher.
 
     We can't `uv run bench` directly: that spawns a Python process that never
@@ -77,8 +89,9 @@ def _bench(*args: str) -> int:
     aip_skillbench._bench_launcher ensures the patches load first.
     """
     cmd = ["uv", "run", "python", "-m", "aip_skillbench._bench_launcher", *args]
-    typer.echo("$ uv run bench " + " ".join(args))  # log the user-friendly form
-    return subprocess.call(cmd)
+    shown = [a if not a.startswith("TYPESAFE_API_KEY=") else "TYPESAFE_API_KEY=…" for a in args]
+    typer.echo("$ uv run bench " + " ".join(shown))  # log the user-friendly form
+    return subprocess.call(cmd, env={**os.environ, **(env or {})})
 
 
 def _read_dotenv(path: Path) -> dict[str, str]:
@@ -95,40 +108,33 @@ def _read_dotenv(path: Path) -> dict[str, str]:
     return out
 
 
-def _run_claude(prompt: str, model: str, add_dirs: list[Path]) -> None:
-    """Shell out to `claude -p` with AIP discoverable from cwd.
-
-    Authoring bills against the `.env` ANTHROPIC_API_KEY when present, so it
-    uses the same API account as eval (not whatever account `claude` is logged
-    into). The .env value takes precedence over any inherited env var.
-    """
-    cmd = ["claude", "-p", prompt, "--model", model]
-    for d in add_dirs:
-        cmd += ["--add-dir", str(d)]
-    cmd += ["--dangerously-skip-permissions"]
-
-    env = os.environ.copy()
+def _author_api_key() -> tuple[str | None, str]:
+    """Authoring bills against the `.env` ANTHROPIC_API_KEY when present, so it uses
+    the same API account as eval (not whatever account `claude` is logged into)."""
     key = _read_dotenv(ROOT / ".env").get("ANTHROPIC_API_KEY")
-    key_src = "inherited env" if not key else ".env"
-    if key:
-        env["ANTHROPIC_API_KEY"] = key
-
-    typer.echo(
-        "$ claude -p <…prompt elided…> --model " + model
-        + "".join(f" --add-dir {d}" for d in add_dirs)
-        + f" --dangerously-skip-permissions   [ANTHROPIC_API_KEY: {key_src}]"
-    )
-    rc = subprocess.call(cmd, cwd=ROOT, env=env)
-    if rc != 0:
-        raise typer.Exit(rc)
-
+    return key, (".env" if key else "inherited env")
 
 @app.command()
 def bootstrap(
-    aip_ref: str = typer.Option("main", help="AIP branch/tag/SHA to clone."),
+    aip_ref: str = typer.Option(
+        AIP_DEFAULT_REF, help="AIP branch or tag to clone (the 0.4a0 format lives on `aip-s1`)."
+    ),
+    aip_sha: Optional[str] = typer.Option(
+        None, "--aip-sha", help="Commit to check out after cloning, for an exact reproduction."
+    ),
     force: bool = typer.Option(False, help="Re-clone if AIP already present."),
+    install_cli: bool = typer.Option(
+        True, "--install-cli/--no-install-cli",
+        help="Install the `aip` CLI on the host (uv tool) and build the wheel trial containers get.",
+    ),
 ) -> None:
-    """One-time setup: clone AIP into ./.claude/skills/aip (gitignored)."""
+    """One-time setup: clone AIP into ./.claude/skills/aip (gitignored), install the
+    host `aip` CLI, build the wheel for trial containers, and record the exact ref.
+
+    The 0.4a0 authoring checklist runs `aip validate` and functional-tests skills
+    with `aip run`, so the CLI has to be on the host PATH for `convert`. Trial
+    containers get the wheel from build/aip/ (see _benchflow_patch).
+    """
     if AIP_DIR.exists():
         if not force:
             typer.echo(f"AIP already at {AIP_DIR} (pass --force to re-clone).")
@@ -137,11 +143,56 @@ def bootstrap(
 
     AIP_DIR.parent.mkdir(parents=True, exist_ok=True)
     cmd = ["git", "clone", "--depth", "1", "--branch", aip_ref, AIP_REMOTE, str(AIP_DIR)]
+    if aip_sha:
+        # A SHA cannot be cloned shallowly by name; take the branch, then fetch the commit.
+        cmd = ["git", "clone", "--branch", aip_ref, AIP_REMOTE, str(AIP_DIR)]
     typer.echo("$ " + " ".join(cmd))
     rc = subprocess.call(cmd)
     if rc != 0:
         raise typer.Exit(rc)
-    typer.echo(f"Installed AIP at {AIP_DIR}")
+    if aip_sha:
+        for step in (["git", "fetch", "origin", aip_sha], ["git", "checkout", "--detach", aip_sha]):
+            typer.echo("$ " + " ".join(step))
+            rc = subprocess.call(step, cwd=AIP_DIR)
+            if rc != 0:
+                raise typer.Exit(rc)
+    sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=AIP_DIR, text=True).strip()
+    version = format_version()
+    typer.echo(f"Installed AIP at {AIP_DIR}  ref={aip_ref}  sha={sha[:12]}  format={version}")
+
+    if install_cli:
+        # Host CLI: `aip validate` / `aip run` for authoring and pack validation.
+        cmd = ["uv", "tool", "install", "--force", "--editable", str(AIP_DIR)]
+        typer.echo("$ " + " ".join(cmd))
+        rc = subprocess.call(cmd)
+        if rc != 0:
+            raise typer.Exit(rc)
+        # Wheel for trial containers.
+        if AIP_BUILD_DIR.exists():
+            shutil.rmtree(AIP_BUILD_DIR)
+        AIP_BUILD_DIR.mkdir(parents=True)
+        cmd = ["uv", "build", "--wheel", "--out-dir", str(AIP_BUILD_DIR), str(AIP_DIR)]
+        typer.echo("$ " + " ".join(cmd))
+        rc = subprocess.call(cmd)
+        if rc != 0:
+            raise typer.Exit(rc)
+        typer.echo(f"Built {aip_wheel().name} in {AIP_BUILD_DIR}")
+
+    GENERATED_SKILLS.mkdir(exist_ok=True)
+    AIP_REF_FILE.write_text(
+        json.dumps(
+            {
+                "remote": AIP_REMOTE,
+                "ref": aip_ref,
+                "sha": sha,
+                "aip_version": version,
+                "recorded_at": datetime.now().isoformat(timespec="seconds"),
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    typer.echo(f"Recorded {AIP_REF_FILE.relative_to(ROOT)} (commit it with the regenerated cohort)")
 
 
 @app.command()
@@ -153,10 +204,26 @@ def eval(
     sandbox: str = typer.Option("docker", help="docker | daytona | modal."),
     concurrency: int = typer.Option(4),
     jobs_dir: Path = typer.Option(None, help="Override jobs/ output dir."),
+    install_aip: bool = typer.Option(
+        True, "--install-aip/--no-install-aip",
+        help="AIP modes: install the `aip` CLI in the trial container so the agent runs the "
+             "procedure through the protocol client (`aip run`). Off = agent executes the graph itself.",
+    ),
+    decision_model: bool = typer.Option(
+        False, "--decision-model/--no-decision-model",
+        help="AIP modes: forward TYPESAFE_API_KEY from .env so decision steps are answered by the "
+             "System One model. Off = the agent answers decision questions itself at each pause.",
+    ),
+    aip_nudge: bool = typer.Option(
+        False, "--aip-nudge/--no-aip-nudge",
+        help="AIP modes: also write a ~/.claude/CLAUDE.md memory in the sandbox telling the agent "
+             "to drive AIP skills through `aip run`. Off = only the skill's runtime block says so.",
+    ),
 ) -> None:
     """Run one evaluation in one of the five modes."""
     task_dir = _task_dir(task)
     out = jobs_dir or (JOBS_DIR / f"{task}-{mode.value}-{model}")
+    env: dict[str, str] = {}
 
     base = [
         "eval", "create",
@@ -187,33 +254,100 @@ def eval(
                 f"No converted skills at {conv}. Run "
                 f"`aip-skillbench convert --task {task} --from {from_.value}` first."
             )
+        failures = validate_packs(conv)
+        if failures:
+            raise typer.BadParameter(
+                "AIP pack does not validate against the bootstrapped AIP format "
+                f"(regenerate with `aip-skillbench convert --task {task} --from {from_.value} --force`):\n  - "
+                + "\n  - ".join(failures)
+            )
         extra = ["--skills-dir", str(conv)]
+        if install_aip:
+            try:
+                env[WHEEL_ENV] = str(aip_wheel())
+            except FileNotFoundError as err:
+                raise typer.BadParameter(str(err)) from err
+            if aip_nudge:
+                env[NUDGE_ENV] = "1"
+        elif aip_nudge:
+            raise typer.BadParameter("--aip-nudge needs --install-aip")
+        if decision_model:
+            key = _read_dotenv(ROOT / ".env").get("TYPESAFE_API_KEY") or os.environ.get("TYPESAFE_API_KEY")
+            if not key:
+                raise typer.BadParameter("--decision-model needs TYPESAFE_API_KEY in .env or the environment")
+            extra += ["--agent-env", f"TYPESAFE_API_KEY={key}"]
     else:
         raise typer.BadParameter(f"unknown mode: {mode}")
 
-    raise typer.Exit(_bench(*base, *extra))
+    raise typer.Exit(_bench(*base, *extra, env=env))
 
+
+_CHECKLIST_NOTE = """\
+Follow the aip skill's "Authoring an Agent Skill" checklist end to end: source/
+materials, SKILL.md with the verbatim runtime block and one fenced YAML procedure,
+`aip validate` after every edit (the `aip` CLI is on PATH), the line-by-line
+completeness check against the sources, and the functional test with `aip run`
+using realistic start inputs. Nobody is watching this session: do not ask
+questions, and skip the checklist's install step (write straight to the
+destination below). Everything you may read is under ./inputs/ and everything you
+write goes under ./out/; do not look anywhere else on this machine. Scripts run
+inside the task's container, so they must work with the packages that container
+provides (see ./inputs/environment/Dockerfile when present) or bootstrap their own
+environment; do not assume extra packages.\
+"""
 
 _PROMPT_FROM_CURATED = """\
 Use the `aip` skill in ./.claude/skills/aip/ to convert the curated Agent
 Skill at:
 
-    {src}
+    ./inputs/skills/{name}
 
 into an AIP skill at:
 
-    {dst}
+    ./out/{name}
+
+{checklist}
 
 Requirements:
-1. Read {src}/SKILL.md. Produce {dst}/SKILL.md in AIP format.
-2. Read every other file under {src}/ (scripts/, references/, assets/, etc.) for context.
-    Create scripts to mirror, copy verbatim into {dst}/, or alter as needed.
-3. Do not change the skill's `name:` frontmatter field — the task's mounted
-   skill name must match.
-4. The skills you author should have all the specialized knowledge and procedures an agent needs to solve this
-   task type autonomously.
+1. Read ./inputs/skills/{name}/SKILL.md and every other file under it (scripts/,
+   references/, assets/, etc.). Copy the originals verbatim into ./out/{name}/source/
+   and write ./out/{name}/source/README.md with the provenance, the step-kind
+   choices, and the deliberate-drop log. Mirror, copy, or adapt supporting files into
+   scripts/, references/, or assets/ as the procedure needs.
+2. Do not change the skill's `name:` frontmatter field ({name}) — the mounted skill
+   directory name must match.
+3. The skill must carry all the specialized knowledge and procedures an agent needs
+   to solve this task type autonomously.
 
-Write nothing outside {dst}/. Do not modify {src}/."""
+Write nothing outside ./out/{name}/."""
+
+
+_PROMPT_FROM_CURATED_SINGLE = """\
+Use the `aip` skill in ./.claude/skills/aip/ to compile the curated Agent
+Skills under:
+
+    ./inputs/skills/
+
+({skill_names}) into ONE AIP skill at:
+
+    ./out/<skill-name>/
+
+{checklist}
+
+Requirements:
+1. Read every SKILL.md and every other file under ./inputs/skills/ (scripts/,
+   references/, assets/, etc.). The curated skills describe one workflow; compile
+   them into a single procedure graph. Copy all the originals verbatim into
+   ./out/<skill-name>/source/ and write ./out/<skill-name>/source/README.md with
+   the provenance, the step-kind choices, and the deliberate-drop log. Mirror, copy,
+   or adapt supporting files into scripts/, references/, or assets/ as the
+   procedure needs.
+2. Pick a concise `<skill-name>`; the directory name under ./out/ must equal the
+   skill's `name:` frontmatter.
+3. The skill must carry all the specialized knowledge and procedures an agent needs
+   to solve this task type autonomously.
+
+Write nothing outside ./out/."""
 
 
 _PROMPT_FROM_INSTRUCTION = """\
@@ -221,22 +355,23 @@ Use the `aip` skill in ./.claude/skills/aip/ to author one or more
 AIP Agent Skills so a downstream agent can solve the
 task described in:
 
-    {instruction_path}
+    ./inputs/instruction.md
 
 Write the skill pack(s) into:
 
-    {dst_root}/<skill-name>/SKILL.md (plus scripts/, references/, assets/ as needed)
+    ./out/<skill-name>/SKILL.md (plus scripts/, references/, assets/ as needed)
+
+{checklist}
 
 Requirements:
-1. Read ONLY {instruction_path}. DO NOT inspect or copy from any existing
-   skills directory under the task — you must author from the
-   instruction alone. 
-2. The skills you author should have all the specialized knowledge and procedures an agent needs to solve this
-   task type autonomously. Pick concise `<skill-name>` value(s); the directory name
-   under {dst_root}/ must match the skill's `name:` frontmatter.
+1. ./inputs/instruction.md is the only input; author from it alone. Copy it into
+   each skill's source/ folder next to its source/README.md.
+2. The skills you author should have all the specialized knowledge and procedures
+   an agent needs to solve this task type autonomously. Pick concise
+   `<skill-name>` value(s); the directory name under ./out/ must match the
+   skill's `name:` frontmatter.
 
-Write nothing outside {dst_root}/. Do not modify the task source."""
-
+Write nothing outside ./out/."""
 
 @app.command()
 def convert(
@@ -253,71 +388,112 @@ def convert(
         "--author-model",
         help="Model used to author. Per AIP spec, use the largest available frontier model.",
     ),
+    single: bool = typer.Option(
+        False, "--single/--per-skill",
+        help="--from curated only: compile all curated skills into one AIP procedure "
+             "(default: one AIP skill per curated skill, names preserved).",
+    ),
+    keep_workspace: bool = typer.Option(
+        False, "--keep-workspace", help="Keep build/authoring/<workspace> after the run (debugging)."
+    ),
 ) -> None:
-    """Produce an AIP skill pack for `task`, by Opus authoring offline.
+    """Produce an AIP skill pack for `task`, by Opus authoring offline in a sandboxed workspace.
+
+    The authoring session sees only ./inputs/ (the curated skills and Dockerfile, or
+    instruction.md) and writes to ./out/; its transcript is audited for any path
+    outside the workspace and the conversion fails on a hit. Prompt, transcript,
+    audit, and metadata land in generated-skills/<task>/_authoring/<from>/.
 
     `--from curated` — convert each skill under
     `vendor/skillsbench/tasks/<task>/environment/skills/` to AIP, preserving
-    names; supporting files (scripts/references) are reproduced, mirrored, or
-    adapted as the authoring model sees fit. Output: `generated-skills/<task>/aip-from-curated/<skill>/`.
+    names (or `--single`: one procedure for the whole task).
+    Output: `generated-skills/<task>/aip-from-curated/<skill>/`.
 
-    `--from instruction` — author one or more AIP skills from
-    `vendor/skillsbench/tasks/<task>/instruction.md` alone. Output:
-    `generated-skills/<task>/aip-from-instruction/<skill>/`.
+    `--from instruction` — author from `instruction.md` alone.
+    Output: `generated-skills/<task>/aip-from-instruction/<skill>/`.
     """
+    from aip_skillbench import _authoring as A
+
     _require_aip()
-    _task_dir(task)  # validate before we touch the filesystem
+    task_dir = _task_dir(task)
     dst_root = _generated_skills_dir(task, from_)
     if dst_root.exists() and not force:
         raise typer.BadParameter(f"already exists: {dst_root} (pass --force to overwrite)")
     if dst_root.exists():
         shutil.rmtree(dst_root)
-    dst_root.mkdir(parents=True)
+    record_dir = GENERATED_SKILLS / task / "_authoring" / from_.value
+    key, key_src = _author_api_key()
 
+    jobs: list[tuple[str, str, Any]] = []  # (label, prompt, stager)
     if from_ is ConvertFrom.curated:
-        _convert_from_curated(task, dst_root, author_model)
+        src_root = _curated_skills_dir(task)
+        skills = sorted(p.name for p in src_root.iterdir() if p.is_dir() and (p / "SKILL.md").exists()) if src_root.exists() else []
+        if not skills:
+            raise typer.BadParameter(f"no skill dirs (with SKILL.md) under {src_root}")
+        dockerfile = task_dir / "environment" / "Dockerfile"
+        if single:
+            jobs.append((
+                "single",
+                _PROMPT_FROM_CURATED_SINGLE.format(skill_names=", ".join(skills), checklist=_CHECKLIST_NOTE),
+                lambda ws: A.stage_curated(ws, src_root, dockerfile),
+            ))
+        else:
+            for name in skills:
+                jobs.append((
+                    name,
+                    _PROMPT_FROM_CURATED.format(name=name, checklist=_CHECKLIST_NOTE),
+                    lambda ws: A.stage_curated(ws, src_root, dockerfile),
+                ))
     else:
-        _convert_from_instruction(task, dst_root, author_model)
+        instruction = task_dir / "instruction.md"
+        if not instruction.exists():
+            raise typer.BadParameter(f"no instruction.md at {instruction}")
+        jobs.append(("instruction", _PROMPT_FROM_INSTRUCTION.format(checklist=_CHECKLIST_NOTE),
+                     lambda ws: A.stage_instruction(ws, instruction)))
+
+    typer.echo(f"Authoring {len(jobs)} AIP pack(s) for task '{task}' from {from_.value} with {author_model} "
+               f"[ANTHROPIC_API_KEY: {key_src}]")
+    failed = False
+    for label, prompt, stage in jobs:
+        ws = A.make_workspace(task, f"{from_.value}-{label}")
+        stage(ws)
+        typer.echo(f"\n→ {label}: workspace {ws.relative_to(ROOT)}")
+        rc, transcript = A.run_author(ws, prompt, author_model, key)
+        audit = A.audit_transcript(transcript, ws)
+        meta = {
+            "task": task, "from": from_.value, "label": label, "single": single,
+            "author_model": author_model, "claude_exit": rc,
+            "started_workspace": ws.name, "recorded_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        produced = A.finalize(ws, dst_root, record_dir / label, audit, meta, keep_workspace)
+        cost = audit.get("total_cost_usd")
+        typer.echo(f"  claude exit={rc}  tool calls={audit['tool_calls']}  cost=${cost:.2f}  produced={produced}"
+                   if isinstance(cost, (int, float)) else
+                   f"  claude exit={rc}  tool calls={audit['tool_calls']}  produced={produced}")
+        if rc != 0:
+            failed = True
+        if not audit["ok"]:
+            failed = True
+            typer.echo("  AUDIT FAILED: tool calls reached outside the workspace:")
+            for v in audit["violations"][:10]:
+                typer.echo(f"    {v['tool']}: {v['hits']}")
+            typer.echo(f"  full record: {(record_dir / label / 'audit.json').relative_to(ROOT)}")
+        if not produced:
+            failed = True
+            typer.echo("  WARNING: nothing written under out/")
+    if failed:
+        typer.echo("\nCONVERSION FAILED (output kept for inspection)")
+        raise typer.Exit(1)
+    _gate(dst_root)
 
 
-def _convert_from_curated(task: str, dst_root: Path, author_model: str) -> None:
-    src_root = _curated_skills_dir(task)
-    if not src_root.exists():
-        raise typer.BadParameter(f"no curated skills at {src_root}")
-    skills = [p for p in src_root.iterdir() if p.is_dir() and (p / "SKILL.md").exists()]
-    if not skills:
-        raise typer.BadParameter(f"no skill dirs (with SKILL.md) under {src_root}")
-    typer.echo(f"Converting {len(skills)} curated skill(s) under task '{task}':")
-
-    for src in skills:
-        dst = dst_root / src.name
-        typer.echo(f"\n→ {src.name}")
-        _run_claude(
-            _PROMPT_FROM_CURATED.format(src=src, dst=dst),
-            model=author_model,
-            add_dirs=[src, dst_root],
-        )
-        if not (dst / "SKILL.md").exists():
-            typer.echo(f"  WARNING: {dst}/SKILL.md not produced by Claude.")
-    typer.echo(f"\nWrote {len(skills)} skill(s) to {dst_root}")
-
-
-def _convert_from_instruction(task: str, dst_root: Path, author_model: str) -> None:
-    instruction_path = _task_dir(task) / "instruction.md"
-    if not instruction_path.exists():
-        raise typer.BadParameter(f"no instruction.md at {instruction_path}")
-    typer.echo(f"Authoring AIP skill(s) for task '{task}' from instruction.md alone…")
-    _run_claude(
-        _PROMPT_FROM_INSTRUCTION.format(instruction_path=instruction_path, dst_root=dst_root),
-        model=author_model,
-        add_dirs=[instruction_path.parent, dst_root],
-    )
-    produced = [p for p in dst_root.iterdir() if p.is_dir() and (p / "SKILL.md").exists()]
-    if not produced:
-        typer.echo(f"WARNING: no SKILL.md files produced under {dst_root}")
-    else:
-        typer.echo(f"\nWrote {len(produced)} skill(s) to {dst_root}: {[p.name for p in produced]}")
-
+def _gate(dst_root: Path) -> None:
+    """Every produced pack must validate against the bootstrapped AIP format."""
+    failures = validate_packs(dst_root)
+    if failures:
+        typer.echo("\nVALIDATION FAILED (output kept for inspection):\n  - " + "\n  - ".join(failures))
+        raise typer.Exit(1)
+    typer.echo(f"Validated {len(list(dst_root.iterdir()))} pack(s) under {dst_root}")
 
 class BatchFrom(str, Enum):
     instruction = "instruction"
@@ -340,7 +516,9 @@ def _already_done(task: str, from_: ConvertFrom) -> bool:
     return any(child.is_dir() and (child / "SKILL.md").exists() for child in d.iterdir())
 
 
-def _convert_one(task: str, from_value: str, author_model: str, force: bool) -> tuple[str, str, int, float, str]:
+def _convert_one(
+    task: str, from_value: str, author_model: str, force: bool, single: bool = False
+) -> tuple[str, str, int, float, str]:
     """Run one `aip-skillbench convert` invocation as a subprocess. Returns (task, from, rc, secs, tail)."""
     import time
     cmd = [
@@ -350,6 +528,8 @@ def _convert_one(task: str, from_value: str, author_model: str, force: bool) -> 
     ]
     if force:
         cmd.append("--force")
+    if single and from_value == "curated":
+        cmd.append("--single")
     t0 = time.time()
     proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
     secs = time.time() - t0
@@ -371,6 +551,10 @@ def batch_convert(
     limit: int = typer.Option(0, help="Cap number of conversions (0 = all)."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the 5s confirm pause."),
     author_model: str = typer.Option("claude-opus-4-7", "--author-model"),
+    single: bool = typer.Option(
+        False, "--single/--per-skill",
+        help="Curated side: compile all curated skills into one AIP procedure per task.",
+    ),
 ) -> None:
     """Author AIP skills for many tasks at once. Skips already-converted output unless --force."""
     import concurrent.futures
@@ -421,7 +605,7 @@ def batch_convert(
     done = failed = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as ex:
         futures = {
-            ex.submit(_convert_one, task, f.value, author_model, force): (task, f.value)
+            ex.submit(_convert_one, task, f.value, author_model, force, single): (task, f.value)
             for task, f in work
         }
         total = len(futures)
@@ -470,6 +654,16 @@ def run_matrix_cmd(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the 5s confirm pause."),
     force: bool = typer.Option(False, "--force", help="Re-run cells already in summary.jsonl."),
     shuffle: bool = typer.Option(False, "--shuffle", help="Randomize cell execution order."),
+    decision_model: Optional[bool] = typer.Option(
+        None, "--decision-model/--no-decision-model",
+        help="AIP modes: answer decision steps with the System One model (TYPESAFE_API_KEY). "
+             "Config key `decision_model`. Default off.",
+    ),
+    aip_nudge: Optional[bool] = typer.Option(
+        None, "--aip-nudge/--no-aip-nudge",
+        help="AIP modes: seed a ~/.claude/CLAUDE.md memory telling the solver to run AIP skills "
+             "through `aip run`. Config key `aip_nudge`. Default off.",
+    ),
 ) -> None:
     """Run a (task × model × mode × trial) eval matrix concurrently with live progress."""
     from aip_skillbench.run_matrix import ALL_MODES, run_matrix
@@ -496,6 +690,10 @@ def run_matrix_cmd(
     agent_resolved = agent if agent is not None else cfg.get("agent", "claude-agent-acp")
     sandbox_resolved = sandbox if sandbox is not None else cfg.get("sandbox", "docker")
     out_resolved = out or (ROOT / "runs" / datetime.now().strftime("%Y-%m-%d__%H-%M-%S"))
+    decision_resolved = (
+        decision_model if decision_model is not None else bool(cfg.get("decision_model", False))
+    )
+    nudge_resolved = aip_nudge if aip_nudge is not None else bool(cfg.get("aip_nudge", False))
 
     rc = run_matrix(
         tasks=tasks_resolved,
@@ -509,6 +707,8 @@ def run_matrix_cmd(
         yes=yes,
         force=force,
         shuffle=shuffle,
+        decision_model=decision_resolved,
+        aip_nudge=nudge_resolved,
     )
     raise typer.Exit(rc)
 

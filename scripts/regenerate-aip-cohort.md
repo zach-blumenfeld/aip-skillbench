@@ -5,7 +5,7 @@ Parallelizes mode-4 and mode-5 authoring across all 16 tasks currently under `ge
 ## Fill these in
 
 ```bash
-AIP_REF=v0.3a2                              # the AIP spec branch/tag to author against
+AIP_REF=aip-s1                            # the AIP branch/tag to author against (0.4a0 lives on aip-s1; no tag yet)
 CONCURRENCY=4                             # parallel claude -p calls; raise for speed, lower if hitting rate limits
 ```
 
@@ -23,7 +23,12 @@ git tag -a aip-spec-vX.Y -m "AIP spec vX.Y cohort" && git push --tags
 
 ```bash
 uv run aip-skillbench bootstrap --aip-ref "$AIP_REF" --force
+cat generated-skills/AIP_REF.json     # remote, ref, sha, aip_version — commit this with the cohort
 ```
+
+This also installs the host `aip` CLI (the 0.4a0 authoring checklist runs `aip validate` and
+`aip run`) and builds `build/aip/*.whl`, which `eval` installs into every AIP-mode trial
+container. To pin an exact commit later, pass `--aip-sha <sha from AIP_REF.json>`.
 
 Verify the branch/tag actually exists in the remote first if you're not sure:
 
@@ -76,18 +81,24 @@ for t in 3d-scan-calc debug-trl-grpo earthquake-phase-association fix-druid-loop
 done
 ```
 
-Spot-check one pack's frontmatter matches the new spec version:
+Every pack must validate against the bootstrapped format (`convert` already gates on
+this; `eval` and `run-matrix` refuse invalid packs):
 
 ```bash
-head -10 generated-skills/3d-scan-calc/aip-from-instruction/*/SKILL.md
-# Expect: metadata.aip.spec: https://github.com/zach-blumenfeld/aip/tree/$AIP_REF
+for d in generated-skills/*/aip-from-*/*/; do aip validate "$d" >/dev/null 2>&1 || echo "INVALID: $d"; done
+head -6 generated-skills/3d-scan-calc/aip-from-instruction/*/SKILL.md
+# Expect: metadata.aip-version: "0.4a0"
 ```
+
+Curated-side packs can be authored one-per-curated-skill (default, names preserved) or
+compiled into one procedure per task (`batch-convert --single`); pick one per cohort and
+record it in the cohort commit message.
 
 ## 5. Commit
 
 ```bash
-git add generated-skills/
-git commit -m "Regenerate AIP cohort against spec $AIP_REF"
+git add generated-skills/          # includes generated-skills/AIP_REF.json
+git commit -m "Regenerate AIP cohort against spec $AIP_REF ($(python3 -c 'import json;print(json.load(open("generated-skills/AIP_REF.json"))["sha"][:12])'))"
 git tag -a aip-spec-$AIP_REF -m "AIP spec $AIP_REF cohort"
 git push && git push --tags
 ```

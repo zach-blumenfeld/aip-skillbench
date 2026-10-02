@@ -117,7 +117,13 @@ Comparison to mode-5 reference run on the same (task, model): both pass; mode-4 
 
 ## Mode 5 — `aip-from-curated`
 
-Opus 4.7 takes the existing human-curated skill and converts it to an AIP-compliant skill: schema-validated YAML body, `metadata.aip.{spec,schemaId}` frontmatter, preserved `name:`, supporting files (scripts/references) reproduced, mirrored, or adapted as the authoring model sees fit. Locked, committed, mounted into every trial.
+Opus 4.7 takes the existing human-curated skill and converts it to an AIP-compliant skill: the verbatim AIP runtime block plus a schema-validated YAML procedure, `metadata.aip-version` frontmatter, preserved `name:` (or, with `convert --single`, one procedure compiled from all of the task's curated skills under an authored name), the originals preserved under `source/`, supporting files (scripts/references/assets) reproduced, mirrored, or adapted as the authoring model sees fit. Locked, committed, validated by `aip validate`, mounted into every trial.
+
+Authoring is sandboxed: the session sees only the curated skills and Dockerfile under a
+throwaway `./inputs/`, and its transcript is audited for any access outside the workspace
+(see README "Sandboxed authoring"); the record lives in `generated-skills/<task>/_authoring/`.
+
+In AIP modes the trial container also gets the `aip` CLI (installed from `build/aip/*.whl` into the image's system Python before the agent starts) so the agent runs the procedure through the protocol client. `--no-install-aip` measures the agent-executes-the-graph fallback; `--decision-model` forwards `TYPESAFE_API_KEY` so decision steps are answered by System One instead of the agent.
 
 ### How to run
 
@@ -197,7 +203,7 @@ uv run aip-skillbench reward jobs/3d-scan-calc-aip-from-curated-claude-haiku-4-5
 
 ### How to tell the AIP skill was actually used
 
-Three audit signals in the trajectory. Use the latest trial dir:
+Four audit signals in the trajectory. Use the latest trial dir:
 
 ```bash
 TRIAL=$(ls -dt jobs/3d-scan-calc-aip-from-curated-claude-haiku-4-5/*/3d-scan-calc__* | head -1)
@@ -227,19 +233,26 @@ for line in open('$TRIAL/agent/acp_trajectory.jsonl'):
 #                                                   the AIP skill, mounted under .claude/skills/
 ```
 
-**3. Skill content matches AIP, not the curated original** — diff what's in the container vs the host. The container copy comes from `generated-skills/<task>/aip-from-curated/`, so its `SKILL.md` has the AIP frontmatter (`metadata.aip.spec`, `metadata.aip.schemaId`) and a fenced YAML body. If you see the original markdown-only format in the trajectory, something is wrong:
+**3. Skill content matches AIP, not the curated original** — diff what's in the container vs the host. The container copy comes from `generated-skills/<task>/aip-from-curated/`, so its `SKILL.md` has the AIP frontmatter (`metadata.aip-version`), the runtime block, and a fenced YAML body. If you see the original markdown-only format in the trajectory, something is wrong:
 
 ```bash
-head -10 generated-skills/3d-scan-calc/aip-from-curated/mesh-analysis/SKILL.md
+head -8 generated-skills/exoplanet-detection-period/aip-from-curated/exoplanet-transit-period/SKILL.md
 # → ---
-# → name: mesh-analysis
+# → name: exoplanet-transit-period
 # → description: …
 # → metadata:
-# →   aip:
-# →     spec: https://github.com/zach-blumenfeld/aip/tree/v0.2
-# →     schemaId: …
+# →   aip-version: "0.4a0"
 # → ---
 ```
+
+**4. The procedure ran through the protocol client** — with the CLI installed, the agent's terminal calls include `aip run <skill> --input …` (and `aip resume …` after each pause; a pause exits with code 3). `timing.json` carries an `aip_install` entry for the in-container install:
+
+```bash
+grep -o 'aip \(run\|resume\)[^"\\]*' $TRIAL/agent/acp_trajectory.jsonl | head
+python3 -c "import json; print(json.load(open('$TRIAL/timing.json')).get('aip_install'))"
+```
+
+No `aip run` in an AIP-mode trajectory means the agent took the runtime block's fallback and executed the graph itself; that is a different condition and should be reported as such.
 
 ### Reference run (sanity check)
 

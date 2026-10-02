@@ -1,0 +1,20 @@
+# 5-task trial: human-curated vs AIP-from-curated (0.4a0, --single packs), Haiku 4.5.
+# aip_nudge seeds ~/.claude/CLAUDE.md in AIP-mode sandboxes so the solver drives the
+# procedure through `aip run`; human-curated cells are unaffected.
+# Requires the packs from scratch/compile-5-tasks.sh; pre-flight validates them.
+tasks:
+  - exoplanet-detection-period
+  - 3d-scan-calc
+  - earthquake-plate-calculation
+  - energy-market-pricing
+  - financial-modeling-qa
+models:
+  - claude-haiku-4-5
+modes:
+  - human-curated
+  - aip-from-curated
+trials: 5
+concurrency: 10
+agent: claude-agent-acp
+sandbox: docker
+aip_nudge: true

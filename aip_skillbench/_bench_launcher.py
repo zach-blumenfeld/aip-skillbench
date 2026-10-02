@@ -10,6 +10,7 @@ delegates to benchflow's typer app — invoked as:
 
 from __future__ import annotations
 
+# ruff: noqa: I001  -- import order is deliberate: aip_skillbench must load before benchflow
 import aip_skillbench  # noqa: F401  # triggers benchflow monkey-patching
 from benchflow.cli.main import app
 

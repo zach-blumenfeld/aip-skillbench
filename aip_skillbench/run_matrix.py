@@ -195,6 +195,19 @@ def _validate_generated_skills(tasks: list[str], modes: list[Mode]) -> None:
             "Missing AIP-converted skill packs. Run `aip-skillbench convert` "
             "or `aip-skillbench batch-convert` first.\n  - " + bullets
         )
+    # Every pack must validate against the bootstrapped AIP format before a
+    # campaign spends money on it (old-format packs fail here after a bump).
+    from aip_skillbench._aip import validate_packs
+
+    failures: list[str] = []
+    for task, sub in needs:
+        failures.extend(validate_packs(GENERATED_SKILLS / task / sub))
+    if failures:
+        raise typer.BadParameter(
+            "AIP skill packs that do not validate against the bootstrapped AIP "
+            "format (regenerate with `aip-skillbench convert --force`):\n  - "
+            + "\n  - ".join(failures)
+        )
 
 
 def _read_dotenv(path: Path) -> dict[str, str]:
@@ -260,7 +273,9 @@ def _find_result_json(cell_jobs_dir: Path) -> Optional[Path]:
 
 
 def _run_cell(
-    cell: Cell, out: Path, agent: str, sandbox: str, state: MatrixState
+    cell: Cell, out: Path, agent: str, sandbox: str, state: MatrixState,
+    decision_model: bool = False,
+    aip_nudge: bool = False,
 ) -> CellResult:
     state.mark_running(cell)
     cell_jobs_dir = out / "cells" / cell.safe_name
@@ -278,6 +293,10 @@ def _run_cell(
         "--concurrency", "1",
         "--jobs-dir", str(cell_jobs_dir),
     ]
+    if decision_model:
+        cmd.append("--decision-model")
+    if aip_nudge:
+        cmd.append("--aip-nudge")
     started_at = datetime.now().isoformat()
     with open(log_path, "w") as logf:
         logf.write("$ " + " ".join(cmd) + "\n\n")
@@ -410,6 +429,8 @@ def run_matrix(
     yes: bool,
     force: bool,
     shuffle: bool,
+    decision_model: bool = False,
+    aip_nudge: bool = False,
 ) -> int:
     if not tasks:
         raise typer.BadParameter("no tasks specified (use --task ... or --config)")
@@ -467,6 +488,8 @@ def run_matrix(
                 "concurrency": concurrency,
                 "agent": agent,
                 "sandbox": sandbox,
+                "decision_model": decision_model,
+                "aip_nudge": aip_nudge,
                 "total_cells": len(cells),
                 "already_done_at_start": len(done),
                 "to_run": len(pending),
@@ -491,7 +514,10 @@ def run_matrix(
     console = Console()
     with Live(_render(state), refresh_per_second=2, console=console) as live:
         with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as ex:
-            futures = {ex.submit(_run_cell, c, out, agent, sandbox, state): c for c in pending}
+            futures = {
+                ex.submit(_run_cell, c, out, agent, sandbox, state, decision_model, aip_nudge): c
+                for c in pending
+            }
             try:
                 for fut in concurrent.futures.as_completed(futures):
                     cell = futures[fut]
