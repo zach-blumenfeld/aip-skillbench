@@ -5,7 +5,7 @@ Parallelizes mode-4 and mode-5 authoring across all 16 tasks currently under `ge
 ## Fill these in
 
 ```bash
-AIP_REF=aip-s1                            # the AIP branch/tag to author against (0.4a0 lives on aip-s1; no tag yet)
+AIP_REF=v0.4a0                            # the AIP tag to author against (default for bootstrap is main)
 CONCURRENCY=4                             # parallel claude -p calls; raise for speed, lower if hitting rate limits
 ```
 

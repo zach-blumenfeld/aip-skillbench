@@ -21,7 +21,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 AIP_DIR = ROOT / ".claude" / "skills" / "aip"
 AIP_REMOTE = "git@github.com:zach-blumenfeld/aip.git"
-AIP_DEFAULT_REF = "aip-s1"
+AIP_DEFAULT_REF = "main"
 AIP_BUILD_DIR = ROOT / "build" / "aip"
 GENERATED_SKILLS = ROOT / "generated-skills"
 AIP_REF_FILE = GENERATED_SKILLS / "AIP_REF.json"

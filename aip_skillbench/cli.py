@@ -117,7 +117,7 @@ def _author_api_key() -> tuple[str | None, str]:
 @app.command()
 def bootstrap(
     aip_ref: str = typer.Option(
-        AIP_DEFAULT_REF, help="AIP branch or tag to clone (the 0.4a0 format lives on `aip-s1`)."
+        AIP_DEFAULT_REF, help="AIP branch or tag to clone (default: main; pin a release with e.g. v0.4a0)."
     ),
     aip_sha: Optional[str] = typer.Option(
         None, "--aip-sha", help="Commit to check out after cloning, for an exact reproduction."

@@ -59,14 +59,15 @@ aip-skillbench/
 git clone --recurse-submodules git@github.com:zach-blumenfeld/aip-skillbench.git
 cd aip-skillbench
 uv sync
-aip-skillbench bootstrap            # clones AIP (0.4a0, branch aip-s1) into ./.claude/skills/aip,
+aip-skillbench bootstrap            # clones AIP main (format 0.4a0) into ./.claude/skills/aip,
                                     # installs the host `aip` CLI, builds build/aip/*.whl,
                                     # writes generated-skills/AIP_REF.json
 cp .env.example .env                # fill in ANTHROPIC_API_KEY
 aip-skillbench --help
 ```
 
-To update AIP later: `aip-skillbench bootstrap --force [--aip-ref <branch|tag>] [--aip-sha <commit>]`.
+To update AIP later: `aip-skillbench bootstrap --force [--aip-ref <branch|tag>] [--aip-sha <commit>]`,
+e.g. `--aip-ref v0.4a0` to pin a release.
 `--aip-sha` reproduces an exact cohort from `generated-skills/AIP_REF.json` after the branch has moved.
 
 ### AIP 0.4a0 and the protocol client
