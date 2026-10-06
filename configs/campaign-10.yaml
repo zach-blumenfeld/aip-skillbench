@@ -1,0 +1,26 @@
+# Campaign collection 10 (docs/campaigns.md): the three AIP 0.5a1 modes, Haiku 4.5.
+# Packs come from `bash scripts/compile-collection.sh 10`; run with
+# `bash scripts/run-campaign.sh 10`. Collections nest: each list extends the smaller one.
+tasks:
+  - exoplanet-detection-period
+  - 3d-scan-calc
+  - earthquake-plate-calculation
+  - energy-market-pricing
+  - financial-modeling-qa
+  - civ6-adjacency-optimizer
+  - court-form-filling
+  - crystallographic-wyckoff-position-analysis
+  - dialogue-parser
+  - powerlifting-coef-calc
+models:
+  - claude-haiku-4-5
+modes:
+  - human-curated
+  - aip-spec
+  - aip-runtime
+trials: 5
+concurrency: 10
+decision_model: false
+aip_nudge: true
+agent: claude-agent-acp
+sandbox: docker

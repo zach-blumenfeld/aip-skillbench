@@ -160,7 +160,7 @@ aip-skillbench reward jobs/3d-scan-calc-aip-runtime-claude-haiku-4-5/<timestamp>
 
 See [skill-modes.md](skill-modes.md) for each mode's authoring input, container mount paths, audit signals, and reference runs.
 
-To sweep many `(task × model × mode × trial)` combinations concurrently with live progress, see [run-matrix.md](run-matrix.md). To regenerate the AIP skill cohort against a new spec version, see [scripts/regenerate-aip-cohort.md](scripts/regenerate-aip-cohort.md).
+To run the benchmark over the three AIP 0.5a1 modes at 1, 5, 10, or 27 tasks (compile the collection's packs, run the campaign, read the results), see [docs/campaigns.md](docs/campaigns.md). To sweep many `(task × model × mode × trial)` combinations concurrently with live progress, see [run-matrix.md](run-matrix.md). To regenerate the AIP skill cohort against a new spec version, see [scripts/regenerate-aip-cohort.md](scripts/regenerate-aip-cohort.md).
 
 ### `batch-convert` flags
 

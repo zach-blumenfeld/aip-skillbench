@@ -1,0 +1,45 @@
+# Campaign collection 27 (docs/campaigns.md): the three AIP 0.5a1 modes, Haiku 4.5.
+# Packs come from `bash scripts/compile-collection.sh 27`; run with
+# `bash scripts/run-campaign.sh 27`. Collections nest: each list extends the smaller one.
+# Appendix B's "27" collection names 28 tasks (the 10 plus 18); all are kept.
+tasks:
+  - exoplanet-detection-period
+  - 3d-scan-calc
+  - earthquake-plate-calculation
+  - energy-market-pricing
+  - financial-modeling-qa
+  - civ6-adjacency-optimizer
+  - court-form-filling
+  - crystallographic-wyckoff-position-analysis
+  - dialogue-parser
+  - powerlifting-coef-calc
+  - adaptive-cruise-control
+  - bike-rebalance
+  - dapt-intrusion-detection
+  - data-to-d3
+  - drone-planning-control
+  - energy-unit-commitment
+  - enterprise-information-search
+  - fix-build-google-auto
+  - grid-dispatch-operator
+  - jax-computing-basics
+  - mars-clouds-clustering
+  - offer-letter-generator
+  - parallel-tfidf-search
+  - protein-expression-analysis
+  - sec-financial-report
+  - spring-boot-jakarta-migration
+  - suricata-custom-exfil
+  - travel-planning
+models:
+  - claude-haiku-4-5
+modes:
+  - human-curated
+  - aip-spec
+  - aip-runtime
+trials: 5
+concurrency: 10
+decision_model: false
+aip_nudge: true
+agent: claude-agent-acp
+sandbox: docker
