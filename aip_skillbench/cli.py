@@ -282,7 +282,7 @@ def eval(
         extra = ["--skills-dir", str(conv)]
         if install_aip:
             try:
-                env[WHEEL_ENV] = str(aip_wheel())
+                env[WHEEL_ENV] = f"{aip_spec_wheel()}:{aip_wheel()}"
             except FileNotFoundError as err:
                 raise typer.BadParameter(str(err)) from err
             if aip_nudge:

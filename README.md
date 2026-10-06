@@ -75,22 +75,23 @@ To update AIP later: `aip-skillbench bootstrap --force [--aip-ref <branch|tag>] 
 an exact cohort after it has moved. Pack validation (`aip-spec validate`) treats the
 `runtime_block_outdated` warning as a failure, so no campaign mixes runtime-block versions.
 
-### AIP 0.4a0 and the protocol client
+### AIP 0.5a1 modes
 
-AIP 0.4a0 skills carry a runtime block that tells the agent to drive the procedure
-with `aip run` when the CLI is present, and to execute the graph itself otherwise.
-In AIP modes, `eval` therefore installs the `aip` wheel into every trial container's
-system Python before the agent starts (see `aip_skillbench/_benchflow_patch.py`); the
-agent then runs the procedure through the protocol client, and execution-step scripts
-see the task image's preinstalled packages. Pass `--no-install-aip` to measure the
-agent-executes-the-graph fallback instead. Decision steps are answered by the agent
-at each pause unless `--decision-model` forwards `TYPESAFE_API_KEY` from `.env`, in
-which case the System One model answers and only low-confidence answers pause.
-Haiku-class solvers tend to skip the runtime block's "use `aip run` if available"
-and execute the graph by hand; `--aip-nudge` seeds a `~/.claude/CLAUDE.md` memory in
-the sandbox telling the solver to drive AIP skills through the client (`run-matrix`
-config key `aip_nudge`). All three switches are experimental conditions: record them
-with the run.
+Two AIP modes use the same pack bytes. In `aip-spec` the pack is mounted as a skill and
+its 0.5a1 runtime block tells the solver to execute the graph itself. In `aip-runtime`
+nothing task-specific is mounted: before the agent starts, the benchflow patch
+(`aip_skillbench/_benchflow_patch.py`, driven by env vars `eval` sets) installs the
+`aip-spec` and `aip` wheels from `build/aip/` into a venv at `/opt/aip` (`--no-deps`,
+runtime dependencies by name from PyPI, since many task images have no git), starts
+`aip server` on `127.0.0.1:8000` detached from the setup shell, and publishes the pack
+to it with `aip publish`. The solver then finds the procedure with `aip search` and
+runs it with `aip run <name>`. `timing.json` records `aip_install`, `aip_server`, and
+`aip_publish`; any setup failure fails the trial rather than silently changing the
+condition. Scripts run by the server run as root; in `aip-spec` they run as the
+solver. Decision steps are answered by the solver at each pause; `--decision-model`
+(`aip-runtime` only) would give the server a `TYPESAFE_API_KEY`. `--aip-nudge` seeds a
+`~/.claude/CLAUDE.md` memory in the sandbox (`run-matrix` config key `aip_nudge`).
+All of these are experimental conditions: record them with the run.
 
 `eval` and `run-matrix` refuse packs that do not validate against the bootstrapped
 AIP format, so a cohort authored against an older format must be regenerated

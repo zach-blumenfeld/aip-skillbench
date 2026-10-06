@@ -34,9 +34,13 @@ HOST_SKILLS_DIR = ROOT / "build" / "skills"
 GENERATED_SKILLS = ROOT / "generated-skills"
 AIP_REF_FILE = GENERATED_SKILLS / "AIP_REF.json"
 
-# Env var read by aip_skillbench._benchflow_patch inside the `bench` subprocess:
-# path to the aip wheel to install into every trial container.
-WHEEL_ENV = "AIP_SKILLBENCH_WHEEL"
+# Env vars read by aip_skillbench._benchflow_patch inside the `bench` subprocess.
+# Colon-separated host paths of the aip-spec and aip wheels to install in the container.
+WHEEL_ENV = "AIP_SKILLBENCH_WHEELS"
+# "1" to start `aip server` in the container (needs WHEEL_ENV).
+SERVER_ENV = "AIP_SKILLBENCH_SERVER"
+# Host path of one skill folder to publish to that server (needs SERVER_ENV).
+PUBLISH_ENV = "AIP_SKILLBENCH_PUBLISH"
 # Set to "1" to also write a CLAUDE.md memory in the sandbox user's home telling the
 # agent to drive AIP skills through `aip run` (an explicit experimental condition).
 NUDGE_ENV = "AIP_SKILLBENCH_NUDGE"
