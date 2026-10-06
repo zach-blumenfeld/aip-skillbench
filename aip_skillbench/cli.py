@@ -492,10 +492,11 @@ def convert(
         False, "--keep-workspace", help="Keep build/authoring/<workspace> after the run (debugging)."
     ),
     stage_data: str = typer.Option(
-        "sample", "--stage-data",
+        "full", "--stage-data",
         help="--from curated: what the author sees of the task's environment/ inputs: "
-             "'sample' (first 2 KB of each file + manifest; format only), 'full' (the real "
-             "files; the author could derive the answer; recorded in meta.json), or 'none'.",
+             "'full' (default: the real files, so distillation can test against them; "
+             "recorded in meta.json), 'sample' (first 2 KB of each file + manifest; format "
+             "only, the stricter condition), or 'none'.",
     ),
 ) -> None:
     """Produce an AIP skill pack for `task`, by Opus authoring offline in a sandboxed workspace.
@@ -633,7 +634,7 @@ def _convert_one(
         cmd.append("--force")
     if single and from_value == "curated":
         cmd.append("--single")
-    if stage_data != "sample":
+    if stage_data != "full":
         cmd += ["--stage-data", stage_data]
     t0 = time.time()
     proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
@@ -660,7 +661,7 @@ def batch_convert(
         False, "--single/--per-skill",
         help="Curated side: compile all curated skills into one AIP procedure per task.",
     ),
-    stage_data: str = typer.Option("sample", "--stage-data", help="sample | full | none (see convert)."),
+    stage_data: str = typer.Option("full", "--stage-data", help="full | sample | none (see convert)."),
 ) -> None:
     """Author AIP skills for many tasks at once. Skips already-converted output unless --force."""
     import concurrent.futures

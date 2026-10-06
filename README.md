@@ -112,12 +112,14 @@ AIP format, so a cohort authored against an older format must be regenerated
 
 `convert` runs the authoring session in a throwaway workspace under `build/authoring/`
 that contains only the aip-spec authoring skill (`build/skills/aip/`), `./inputs/` (the
-curated skills, the task Dockerfile, and the task's `environment/` input files
-truncated to their first 2 KB with a manifest of real sizes, so the author sees the
-real input format but not the benchmark instance, or `instruction.md`), an empty
-`./out/`, and a `./scratch/` for functional-test inputs (discarded). `--stage-data
-full` stages the real files for experiments and is recorded in the pack's
-`meta.json`. Never `tests/` or `solution/`. No `--add-dir` is granted and
+curated skills, the task Dockerfile, and the task's `environment/` input files as they
+are, so the author can test the distilled procedure against the real inputs the way
+a human skill author would, or `instruction.md`), an empty `./out/`, and a
+`./scratch/` for functional-test inputs (discarded). Never `tests/` or `solution/`.
+The author can tune to the instance; that is accepted as part of the "distilled from
+curated knowledge" condition and recorded in the pack's `meta.json` (`stage_data`).
+`--stage-data sample` (first 2 KB of each file plus a manifest) is the stricter,
+format-only condition for experiments. No `--add-dir` is granted and
 the prompt names only workspace-relative paths, so the task's `tests/` and
 `solution/` are not in view. The session still runs with permissions skipped (it has
 to execute `aip-spec validate`, `aip run`, and the scripts it writes), so enforcement is by audit: the full

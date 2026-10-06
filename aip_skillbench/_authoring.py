@@ -96,11 +96,13 @@ def _sample_file(src: Path, dst: Path) -> None:
 def stage_environment(ws: Path, env_dir: Path, mode: str) -> list[str]:
     """The task's environment/ (inputs the skill will run on), never tests/ or solution/.
 
-    mode "sample" (default): every file truncated to its first SAMPLE_BYTES under its
-    real relative name, plus MANIFEST.md with true sizes. The author sees headers,
-    delimiters, columns, cadence, and layout, but cannot compute or tune against the
-    benchmark instance. mode "full": the files as they are (recorded in meta.json;
-    the author could derive the answer). mode "none": only the Dockerfile.
+    mode "full" (default, decided 2026-10-06): the files as they are, so the author can
+    functional-test the distilled procedure against the real inputs the way a human
+    skill author would; the author never sees tests/ or solution/, but it can tune to
+    the instance, and that is accepted as part of the condition (recorded in
+    meta.json). mode "sample": every file truncated to its first SAMPLE_BYTES under
+    its real relative name plus MANIFEST.md with true sizes: format only, the stricter
+    condition. mode "none": only the Dockerfile.
     """
     out = ws / "inputs" / "environment"
     out.mkdir(parents=True, exist_ok=True)
@@ -135,7 +137,7 @@ def stage_environment(ws: Path, env_dir: Path, mode: str) -> list[str]:
     return staged
 
 
-def stage_curated(ws: Path, curated_root: Path, env_dir: Path | None, data_mode: str = "sample") -> list[str]:
+def stage_curated(ws: Path, curated_root: Path, env_dir: Path | None, data_mode: str = "full") -> list[str]:
     names: list[str] = []
     for src in sorted(p for p in curated_root.iterdir() if p.is_dir() and (p / "SKILL.md").exists()):
         shutil.copytree(src, ws / "inputs" / "skills" / src.name, ignore=_INPUT_IGNORE)
