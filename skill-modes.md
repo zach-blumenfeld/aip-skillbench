@@ -1,34 +1,38 @@
 # Skill Modes
 
-Runbook for the five evaluation conditions defined in the [README](README.md). For background on what each mode is and why, see the README; this doc focuses on how to run each, where the skill lives in the container, where results land, and how to audit them.
+Runbook for the evaluation conditions defined in the [README](README.md). For background on what each mode is and why, see the README; this doc focuses on how to run each, where the skill lives in the container, where results land, and how to audit them.
 
 ## Overview
 
 | Mode | Authored by | Input | Authored when | Trials use |
 |---|---|---|---|---|
-| 1 noskill | — | — | — | nothing |
-| 2 human-curated | human | task domain expertise (no file) | offline | committed `vendor/skillsbench/tasks/<task>/environment/skills/` |
-| 3 selfgen-skill-creator | same model as solver | `vendor/skillsbench/tasks/<task>/instruction.md` | per trial (in-sandbox) | freshly-generated skill (sandbox-local, ephemeral) |
-| 4 aip-from-instruction | Opus 4.7 | `vendor/skillsbench/tasks/<task>/instruction.md` | once, locked | committed `generated-skills/<task>/aip-from-instruction/` |
-| 5 aip-from-curated | Opus 4.7 | `vendor/skillsbench/tasks/<task>/instruction.md` + `vendor/skillsbench/tasks/<task>/environment/skills/` | once, locked | committed `generated-skills/<task>/aip-from-curated/` |
+| `noskill` | — | — | — | nothing |
+| `human-curated` | human | task domain expertise (no file) | offline | committed `vendor/skillsbench/tasks/<task>/environment/skills/` |
+| `selfgen-skill-creator` | same model as solver | `vendor/skillsbench/tasks/<task>/instruction.md` | per trial (in-sandbox) | freshly-generated skill (sandbox-local, ephemeral) |
+| `aip-from-instruction` | Opus | `vendor/skillsbench/tasks/<task>/instruction.md` | once, locked | committed `generated-skills/<task>/aip-from-instruction/` mounted as skills |
+| `aip-spec` | Opus | the task's curated skills + Dockerfile | once, locked | committed `generated-skills/<task>/aip-from-curated/<skill>/` mounted as a skill, plus the `aip-spec` memory file |
+| `aip-runtime` | Opus | same pack as `aip-spec` | once, locked | the same pack published to an in-container `aip server`; only the generic `aip-runtime` skill mounted; the `aip-runtime` memory file |
+| `model-dist` | — | — | — | not implemented (exits 2); see `prompts/modes-plan.md` Appendix A |
 
-Every mode runs the same solver call shape: `aip-skillbench eval --task <T> --model <M> --mode <name>`. The differences are the skill artifacts mounted into the container and when/by-whom they were authored.
+`aip-from-curated` is accepted as a deprecated alias of `aip-runtime`: `eval` prints a note and proceeds as `aip-runtime`. It remains the pack directory name.
 
-## Validation status (3d-scan-calc / claude-haiku-4-5, n=1)
+Every mode runs the same solver call shape: `aip-skillbench eval --task <T> --model <M> --mode <name>`. The differences are the skill artifacts mounted into the container, what else the container is given, and when/by-whom the skills were authored.
+
+## Validation status (3d-scan-calc / claude-haiku-4-5, n=1, AIP 0.3-era packs)
 
 | Mode | Trial | Reward | Tool calls | Wall clock |
 |---|---|---|---|---|
-| 1 noskill | `3d-scan-calc__0edf4a0a` | 1.0 | 8 | 82.0 s |
-| 2 human-curated | `3d-scan-calc__1e05fcb6` | 1.0 | 5 | 51.6 s |
-| 3 selfgen-skill-creator | `3d-scan-calc__a2d82ebb` | 1.0 | 14 | 113.8 s |
-| 4 aip-from-instruction | `3d-scan-calc__fdaf7b47` | 1.0 | 9 | 84.4 s |
-| 5 aip-from-curated | `3d-scan-calc__2e275197` | 1.0 | 4 | 51.7 s |
+| noskill | `3d-scan-calc__0edf4a0a` | 1.0 | 8 | 82.0 s |
+| human-curated | `3d-scan-calc__1e05fcb6` | 1.0 | 5 | 51.6 s |
+| selfgen-skill-creator | `3d-scan-calc__a2d82ebb` | 1.0 | 14 | 113.8 s |
+| aip-from-instruction | `3d-scan-calc__fdaf7b47` | 1.0 | 9 | 84.4 s |
+| aip-from-curated (old mode 5: pack mounted, `aip` CLI installed) | `3d-scan-calc__2e275197` | 1.0 | 4 | 51.7 s |
 
-This task on Haiku is at ceiling — every mode passes. Differentiation will require harder tasks, weaker models, or n>1 per cell.
+These predate the `aip-spec` / `aip-runtime` split. This task on Haiku is at ceiling — every mode passes. Differentiation will require harder tasks, weaker models, or n>1 per cell.
 
 ---
 
-## Mode 1 — `noskill`
+## `noskill`
 
 Baseline. Agent receives only `instruction.md` and the task's environment fixtures (data files, Dockerfile). No skill mounted.
 
@@ -44,7 +48,7 @@ uv run aip-skillbench eval --task 3d-scan-calc --model claude-haiku-4-5 --mode n
 
 ---
 
-## Mode 2 — `human-curated`
+## `human-curated`
 
 Mounts the human-authored skill that ships with the task. This is what the SkillsBench paper calls the "With Skills" condition.
 
@@ -63,7 +67,7 @@ Skill location (host, read-only): `vendor/skillsbench/tasks/<task>/environment/s
 
 ---
 
-## Mode 3 — `selfgen-skill-creator`
+## `selfgen-skill-creator`
 
 Paper-style self-gen. Each trial spins up a fresh sandbox; the agent runs a *creator* scene (only `skill-creator` skill mounted, reads `instruction.md`, writes one or more skills under the in-container generated-skills root), then a clean *solver* scene starts and gets only those just-generated skills. Same model authors and solves.
 
@@ -71,7 +75,7 @@ Paper-style self-gen. Each trial spins up a fresh sandbox; the agent runs a *cre
 uv run aip-skillbench eval --task 3d-scan-calc --model claude-haiku-4-5 --mode selfgen-skill-creator
 ```
 
-Skill-creator source is pinned: `aip-skillbench eval --mode selfgen-skill-creator` always passes `--skill-creator-dir vendor/skillsbench/.agents/skills/skill-creator` to benchflow, so the same SHA of skill-creator is used regardless of what's in your `~/.claude/skills/`. This makes mode-3 results reproducible across machines. If you ever want to use a different skill-creator (e.g. an experimental version), call `bench eval create` directly with `--skill-creator-dir <path>`. Generated skills land under `jobs/<run>/<trial>/_self_gen/<task>-<hex>/` per trial.
+Skill-creator source is pinned: `aip-skillbench eval --mode selfgen-skill-creator` always passes `--skill-creator-dir vendor/skillsbench/.agents/skills/skill-creator` to benchflow, so the same SHA of skill-creator is used regardless of what's in your `~/.claude/skills/`. This makes self-gen results reproducible across machines. If you ever want to use a different skill-creator (e.g. an experimental version), call `bench eval create` directly with `--skill-creator-dir <path>`. Generated skills land under `jobs/<run>/<trial>/_self_gen/<task>-<hex>/` per trial.
 
 ### Reference run
 
@@ -82,9 +86,9 @@ Skill-creator source is pinned: `aip-skillbench eval --mode selfgen-skill-creato
 
 ---
 
-## Mode 4 — `aip-from-instruction`
+## `aip-from-instruction`
 
-Opus 4.7 authors an AIP skill **once** from `instruction.md` alone, locked, committed; every trial mounts the same skill. Authoring runs offline on the host via `claude -p`; no Docker, no env access during authoring.
+Opus authors an AIP skill **once** from `instruction.md` alone, locked, committed; every trial mounts the same skill. Authoring runs offline on the host via `claude -p`; no Docker, no env access during authoring.
 
 Two commands — author once, eval many:
 
@@ -95,11 +99,11 @@ uv run aip-skillbench eval --task 3d-scan-calc --model claude-haiku-4-5 --mode a
 
 Output (committed to git): `generated-skills/<task>/aip-from-instruction/<skill-name>/`.
 
-Notable difference from mode 5: the skill is authored from scratch, so Opus picks its own `<skill-name>` (e.g. `stl-mass-from-scan` for 3d-scan-calc, not the curated `mesh-analysis`), and any helper scripts are written by Opus rather than copied from a human-authored skill.
+Notable difference from the curated-side pack: the skill is authored from scratch, so Opus picks its own `<skill-name>` (e.g. `stl-mass-from-scan` for 3d-scan-calc, not the curated `mesh-analysis`), and any helper scripts are written by Opus rather than copied from a human-authored skill.
 
 ### Reference run
 
-First validated mode-4 trial:
+First validated trial:
 
 - Task: `3d-scan-calc`
 - Model: `claude-haiku-4-5`
@@ -111,160 +115,134 @@ First validated mode-4 trial:
 - Wall clock: 84.4 s (env 6.1 + agent setup 0.6 + agent execution 60.0 + verifier 2.5)
 - Skill activated via `Skill` tool: yes — `Launching skill: stl-mass-from-scan`
 
-Comparison to mode-5 reference run on the same (task, model): both pass; mode-4 used 9 tool calls vs mode-5's 4, primarily because the Opus-authored skill ships a runnable script that the agent invoked directly and then sanity-checked, rather than writing its own glue code.
+Comparison to the old `aip-from-curated` reference run on the same (task, model): both pass; this one used 9 tool calls vs 4, primarily because the Opus-authored skill ships a runnable script that the agent invoked directly and then sanity-checked, rather than writing its own glue code.
 
 ---
 
-## Mode 5 — `aip-from-curated`
+## The curated-side AIP pack (shared by `aip-spec` and `aip-runtime`)
 
-Opus 4.7 takes the existing human-curated skill and converts it to an AIP-compliant skill: the verbatim AIP runtime block plus a schema-validated YAML procedure, `metadata.aip-version` frontmatter, preserved `name:` (or, with `convert --single`, one procedure compiled from all of the task's curated skills under an authored name), the originals preserved under `source/`, supporting files (scripts/references/assets) reproduced, mirrored, or adapted as the authoring model sees fit. Locked, committed, validated by `aip validate`, mounted into every trial.
-
-Authoring is sandboxed: the session sees only the curated skills and Dockerfile under a
-throwaway `./inputs/`, and its transcript is audited for any access outside the workspace
-(see README "Sandboxed authoring"); the record lives in `generated-skills/<task>/_authoring/`.
-
-In AIP modes the trial container also gets the `aip` CLI (installed from `build/aip/*.whl` into the image's system Python before the agent starts) so the agent runs the procedure through the protocol client. `--no-install-aip` measures the agent-executes-the-graph fallback; `--decision-model` forwards `TYPESAFE_API_KEY` so decision steps are answered by System One instead of the agent.
-
-### How to run
-
-Two steps. **Author once**, then **eval many** times across models / repeats.
+Opus compiles all of a task's curated skills into **one** AIP procedure (`convert --from curated --single`, the default for these modes): the verbatim 0.5a1 runtime block plus a schema-validated YAML procedure, `metadata.aip-version` frontmatter, the originals preserved under `source/`, and supporting scripts reproduced or adapted. Locked, committed, and gated by `aip-spec validate` (a `runtime_block_outdated` warning counts as a failure, so no campaign mixes block versions). Both modes use the same pack bytes.
 
 ```bash
-# Step 1 — convert curated → AIP (one Opus call, ~$0.30-1, ~1-2 min)
-uv run aip-skillbench convert --task 3d-scan-calc --from curated
-
-# Step 2 — eval (one trial; ~30-60 s for Haiku on this task)
-uv run aip-skillbench eval --task 3d-scan-calc --model claude-haiku-4-5 --mode aip-from-curated
+# Author once (one Opus call, ~$0.30-1, ~1-2 min)
+uv run aip-skillbench convert --task 3d-scan-calc --from curated --single
 ```
 
-Defaults: `--author-model claude-opus-4-7` (per AIP spec: largest available frontier model for authoring). The eval `--model` is independent and should be whatever you're measuring.
+Authoring is sandboxed: the session sees only the curated skills and Dockerfile under a throwaway `./inputs/`, and its transcript is audited for any access outside the workspace (see README "Sandboxed authoring"); the record lives in `generated-skills/<task>/_authoring/`.
 
-### Where the skill is
-
-Host (committed in this repo):
+Host layout (committed):
 
 ```
-generated-skills/3d-scan-calc/aip-from-curated/
-└── mesh-analysis/
-    ├── SKILL.md                       # AIP frontmatter + fenced YAML body
-    ├── scripts/mesh_tool.py           # carried over from the curated skill (copied, mirrored, or adapted)
-    └── source/
-        ├── ORIGINAL_SKILL.md          # the human-written original, preserved
-        └── procedure.schema.json      # AIP schema the YAML body validates against
+generated-skills/3d-scan-calc/
+├── aip-from-curated/                  # the pack dir: skill folders only
+│   └── stl-mass-calc/
+│       ├── SKILL.md                   # frontmatter + runtime block + fenced YAML procedure
+│       ├── scripts/…                  # execution-step scripts
+│       └── source/…                   # the curated originals
+└── _authoring/curated/single/         # prompt, transcript, audit.json, meta.json
 ```
 
-Inside the container, three paths exist after env setup — same skill, three locations:
+`eval` validates the pack before every AIP trial and `run-matrix` validates every pack before a campaign spends money.
+
+### Memory files
+
+Both AIP modes get a short, directive `~/.claude/CLAUDE.md` (written to `/root/.claude/CLAUDE.md` before the sandbox user exists; benchflow copies it into `/home/agent/.claude/`). The two texts live side by side in `aip_skillbench/_benchflow_patch.py` (`NUDGE_MEMORY`) and are held constant across campaigns. `human-curated` gets none. `--no-aip-nudge` (or `aip_nudge: false` in a `run-matrix` config) is the explicit ablation. The patch logs `aip memory (<mode>) written` and `timing.json` carries `memory_file` (seconds).
+
+### Decision steps
+
+The decision model (TypeSafe) is off in every mode: decision steps pause and the solver answers them. `--decision-model` is accepted only with `aip-runtime`, where it puts `TYPESAFE_API_KEY` from `.env` into the **server** process's environment (via `AIP_SKILLBENCH_SERVER_ENV`), never the agent's. `eval` refuses it for any other mode; `run-matrix` passes it to `aip-runtime` cells only.
+
+---
+
+## `aip-spec`
+
+The Spec alone. The pack is mounted as a skill; its 0.5a1 runtime block tells the solver to execute the graph itself (start step, each execution step's script with the JSON state on stdin, follow `inputs_to` and routers, answer decisions). No `aip` CLI, no server.
+
+```bash
+uv run aip-skillbench eval --task 3d-scan-calc --model claude-haiku-4-5 --mode aip-spec
+```
+
+What `eval` sets: `--skills-dir generated-skills/<task>/aip-from-curated`, and `AIP_SKILLBENCH_NUDGE=aip-spec` (unless `--no-aip-nudge`).
+
+Container paths:
 
 | Container path | Origin | Used by agent? |
 |---|---|---|
-| `/skills/mesh-analysis/` | benchflow's runtime upload from `--skills-dir` (`benchflow/agents/install.py:239`) | indirect — symlinked from below |
-| `/home/agent/.claude/skills/mesh-analysis/` | symlink, claude-agent-acp's skill-discovery path | **yes** — the agent reads this |
-| `/app/skills/mesh-analysis/` | benchflow's task-fixtures upload (`benchflow/rollout.py:544`, copies the original curated skill) | no — unused in this mode |
+| `/home/agent/.claude/skills/<skill>/` | symlink to benchflow's `--skills-dir` upload | **yes** — the procedure the solver executes |
+| `/home/agent/.claude/CLAUDE.md` | the `aip-spec` memory file | yes, loaded as user memory |
+| `/app/skills/<curated-skill>/` | benchflow's task-fixtures upload of the curated originals | no — unused in this mode |
 
-The sandbox-user default for `bench eval create` is `agent` (so `/home/agent/.claude/skills/…`); pass `--sandbox-user` to override.
+Scripts run as the solver (the `agent` sandbox user).
 
-### Where the results are
+Audit signals (`TRIAL=$(ls -dt jobs/<task>-aip-spec-<model>/*/<task>__* | head -1)`):
 
-Each call to `aip-skillbench eval --mode aip-from-curated` writes one trial dir:
+```bash
+grep '"Launching skill' $TRIAL/agent/acp_trajectory.jsonl          # the pack's skill name
+grep -c '"aip ' $TRIAL/agent/acp_trajectory.jsonl                 # 0: no aip CLI in this mode
+grep -o 'currentState' $TRIAL/agent/acp_trajectory.jsonl | wc -l  # scripts fed JSON state on stdin
+python3 -c "import json; t=json.load(open('$TRIAL/timing.json')); print(sorted(t))"   # no aip_* keys
+```
+
+---
+
+## `aip-runtime`
+
+The Protocol. Nothing task-specific is mounted. Before the agent is installed, the benchflow patch (as root) installs the `aip-spec` and `aip` wheels from `build/aip/` into `/opt/aip`, starts `aip server` (filesystem backend) on `127.0.0.1:8000`, and publishes the pack to it. The solver gets only the generic `aip-runtime` skill and `AIP_SERVER`, and is expected to `aip search` with the task's words, `aip info` the match, `aip run <name> --input start.json`, and answer each pause with `aip resume`.
+
+```bash
+uv run aip-skillbench eval --task 3d-scan-calc --model claude-haiku-4-5 --mode aip-runtime
+```
+
+What `eval` sets: `--skills-dir build/aip-runtime-skill` (only `aip-runtime/SKILL.md`), `--agent-env AIP_SERVER=http://127.0.0.1:8000`, and for the patch `AIP_SKILLBENCH_WHEELS`, `AIP_SKILLBENCH_SERVER=1`, `AIP_SKILLBENCH_PUBLISH=<the one skill folder>`, `AIP_SKILLBENCH_NUDGE=aip-runtime` (unless `--no-aip-nudge`). The pack dir must hold exactly one skill folder (`--single`); `eval` refuses otherwise.
+
+Container paths:
+
+| Container path | Origin | Used by agent? |
+|---|---|---|
+| `/home/agent/.claude/skills/aip-runtime/` | `build/aip-runtime-skill/` (from `aip runtime --skill`) | **yes** — the protocol directions |
+| `/home/agent/.claude/CLAUDE.md` | the `aip-runtime` memory file | yes, loaded as user memory |
+| `/opt/aip/` | venv with `aip` and `aip-spec`; `/usr/local/bin/aip` symlinks into it | yes, via the CLI |
+| `/opt/aip/packs/<skill>/` | the published pack's upload | no — the server runs it |
+| `/opt/aip/catalog/` | the server's filesystem backend | no |
+| `/var/log/aip-server.log` | server log | no (useful when debugging) |
+| `/app/skills/<curated-skill>/` | benchflow's task-fixtures upload of the curated originals | no — unused in this mode |
+
+**Root vs agent.** The server is a root process, so execution-step scripts run as root in this mode, while in `aip-spec` they run as the solver. That is acceptable for these tasks: outputs land under `/root/`, which the verifier reads.
+
+Audit signals (`TRIAL=$(ls -dt jobs/<task>-aip-runtime-<model>/*/<task>__* | head -1)`):
+
+```bash
+grep '"Launching skill' $TRIAL/agent/acp_trajectory.jsonl                 # aip-runtime, not a task skill
+grep -o 'aip \(search\|info\|run\|resume\)[^"\\]*' $TRIAL/agent/acp_trajectory.jsonl | head
+python3 -c "import json; t=json.load(open('$TRIAL/timing.json')); print({k: t[k] for k in t if k.startswith('aip_')})"
+# → aip_install, aip_server, aip_publish
+```
+
+`aip run` should name the procedure (`aip run stl-mass-calc …`), not a folder path. No `aip run` in the trajectory means the solver solved the task some other way; report it as such. The `name@revision` the patch published is in benchflow's log.
+
+---
+
+## `model-dist`
+
+Placeholder for the "compile to code without the Spec" ablation. `eval --mode model-dist` exits 2 with "not implemented; see prompts/modes-plan.md Appendix A", and `run-matrix` refuses it up front.
+
+---
+
+## Where the results are
+
+Each `eval` call writes one trial dir:
 
 ```
-jobs/3d-scan-calc-aip-from-curated-claude-haiku-4-5/
+jobs/<task>-<mode>-<model>/
 └── <timestamp>/                       # one launch
-    └── 3d-scan-calc__<8-hex>/         # one trial
+    └── <task>__<8-hex>/               # one trial
         ├── result.json                # rewards, timing, n_tool_calls, model, scenes
-        ├── rewards.jsonl              # terminal reward event(s)
-        ├── timing.json                # env_setup + agent_execution + verifier
+        ├── timing.json                # environment_setup, aip_* (aip-runtime), memory_file, agent_*, verifier
         ├── config.json                # full run config snapshot
-        ├── agent/
-        │   ├── acp_trajectory.jsonl   # full agent transcript (one event per line)
-        │   ├── claude_agent_acp.txt   # stdout/stderr of the harness process
-        │   └── install-stdout.txt
-        ├── trajectory/
-        │   └── acp_trajectory.jsonl   # mirror of agent/acp_trajectory.jsonl
-        ├── verifier/
-        │   ├── reward.txt             # final 0.0–1.0 score (one number)
-        │   ├── ctrf.json              # Common Test Report Format
-        │   └── test-stdout.txt
-        └── artifacts/
+        ├── agent/acp_trajectory.jsonl # full agent transcript (one event per line)
+        └── verifier/reward.txt        # final 0.0–1.0 score
 ```
-
-Quick reads:
 
 ```bash
-# Score
-cat jobs/3d-scan-calc-aip-from-curated-claude-haiku-4-5/*/3d-scan-calc__*/verifier/reward.txt
-
-# Full result summary
-cat jobs/3d-scan-calc-aip-from-curated-claude-haiku-4-5/*/3d-scan-calc__*/result.json
-
-# Helper
-uv run aip-skillbench reward jobs/3d-scan-calc-aip-from-curated-claude-haiku-4-5/<timestamp>/
+uv run aip-skillbench reward jobs/3d-scan-calc-aip-runtime-claude-haiku-4-5/<timestamp>/
 ```
-
-### How to tell the AIP skill was actually used
-
-Four audit signals in the trajectory. Use the latest trial dir:
-
-```bash
-TRIAL=$(ls -dt jobs/3d-scan-calc-aip-from-curated-claude-haiku-4-5/*/3d-scan-calc__* | head -1)
-```
-
-**1. Skill-tool invocation** — Claude Code emits a `Skill` tool call when a skill activates. Grep for it:
-
-```bash
-grep '"Launching skill"' $TRIAL/agent/acp_trajectory.jsonl
-# → "text": "Launching skill: mesh-analysis"
-```
-
-**2. Container path in agent-written code** — the agent's own code references `~/.claude/skills/<skill>/` paths. Look at any file the agent wrote via the `Write` tool:
-
-```bash
-python3 -c "
-import json
-for line in open('$TRIAL/agent/acp_trajectory.jsonl'):
-    e = json.loads(line)
-    if e.get('type') == 'tool_call':
-        for c in e.get('content', []):
-            if c.get('type') == 'diff':
-                print(c.get('newText', '')[:500])
-"
-# Look for: sys.path.insert(0, '/home/agent/.claude/skills/mesh-analysis/scripts')
-#                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-#                                                   the AIP skill, mounted under .claude/skills/
-```
-
-**3. Skill content matches AIP, not the curated original** — diff what's in the container vs the host. The container copy comes from `generated-skills/<task>/aip-from-curated/`, so its `SKILL.md` has the AIP frontmatter (`metadata.aip-version`), the runtime block, and a fenced YAML body. If you see the original markdown-only format in the trajectory, something is wrong:
-
-```bash
-head -8 generated-skills/exoplanet-detection-period/aip-from-curated/exoplanet-transit-period/SKILL.md
-# → ---
-# → name: exoplanet-transit-period
-# → description: …
-# → metadata:
-# →   aip-version: "0.4a0"
-# → ---
-```
-
-**4. The procedure ran through the protocol client** — with the CLI installed, the agent's terminal calls include `aip run <skill> --input …` (and `aip resume …` after each pause; a pause exits with code 3). `timing.json` carries an `aip_install` entry for the in-container install:
-
-```bash
-grep -o 'aip \(run\|resume\)[^"\\]*' $TRIAL/agent/acp_trajectory.jsonl | head
-python3 -c "import json; print(json.load(open('$TRIAL/timing.json')).get('aip_install'))"
-```
-
-No `aip run` in an AIP-mode trajectory means the agent took the runtime block's fallback and executed the graph itself; that is a different condition and should be reported as such.
-
-### Reference run (sanity check)
-
-First validated mode-5 trial:
-
-- Task: `3d-scan-calc`
-- Model: `claude-haiku-4-5`
-- Agent: `claude-agent-acp`
-- Trial: `3d-scan-calc__2e275197` (run `2026-05-26__17-23-22`)
-- Reward: **1.0** (pass)
-- Tool calls: 4 (`Skill` launch → `Read` density table → `Write` script → `Terminal` execute)
-- Wall clock: 51.7 s (env setup 4.1 + agent setup 0.6 + agent execution 30.0 + verifier 2.5)
-- Computed: main part volume 6242.89 cm³, material ID 42 (Unobtanium), mass 34648.04 g
-
-Sets a known-good baseline for the (task, model) pair. Re-running mode-5 on this pair should produce comparable reward and similar tool-call structure.

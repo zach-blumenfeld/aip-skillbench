@@ -1,4 +1,4 @@
-"""aip-skillbench CLI — five-mode evaluation harness over SkillsBench tasks."""
+"""aip-skillbench CLI — multi-mode evaluation harness over SkillsBench tasks."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from aip_skillbench._aip import (
     AIP_DEFAULT_REF,
     AIP_REF_FILE,
     AIP_REMOTE,
+    AIP_SERVER_URL,
     AIP_SPEC_DEFAULT_REF,
     AIP_SPEC_DIR,
     AIP_SPEC_REMOTE,
@@ -25,12 +26,16 @@ from aip_skillbench._aip import (
     GENERATED_SKILLS,
     HOST_SKILLS_DIR,
     NUDGE_ENV,
+    PUBLISH_ENV,
     ROOT,
+    SERVER_ENV,
+    SERVER_EXTRA_ENV,
     WHEEL_ENV,
     aip_spec_wheel,
     aip_wheel,
     format_version,
     runtime_skill_dir,
+    skill_dirs,
     validate_packs,
 )
 
@@ -46,7 +51,14 @@ class Mode(str, Enum):
     human_curated = "human-curated"
     selfgen_skill_creator = "selfgen-skill-creator"
     aip_from_instruction = "aip-from-instruction"
+    aip_spec = "aip-spec"
+    aip_runtime = "aip-runtime"
+    model_dist = "model-dist"
+    # Deprecated alias of aip-runtime (the old mode name; still the pack dir name).
     aip_from_curated = "aip-from-curated"
+
+
+MODEL_DIST_NOT_IMPLEMENTED = "not implemented; see prompts/modes-plan.md Appendix A"
 
 
 class ConvertFrom(str, Enum):
@@ -67,6 +79,24 @@ def _curated_skills_dir(task: str) -> Path:
 
 def _generated_skills_dir(task: str, from_: ConvertFrom) -> Path:
     return GENERATED_SKILLS / task / f"aip-from-{from_.value}"
+
+
+def _checked_pack(task: str, from_: ConvertFrom) -> Path:
+    """The task's generated pack dir, refused unless every skill in it validates (strictly)."""
+    conv = _generated_skills_dir(task, from_)
+    if not skill_dirs(conv):
+        raise typer.BadParameter(
+            f"No converted skills at {conv}. Run "
+            f"`aip-skillbench convert --task {task} --from {from_.value}` first."
+        )
+    failures = validate_packs(conv)
+    if failures:
+        raise typer.BadParameter(
+            "AIP pack does not validate against the bootstrapped AIP format "
+            f"(regenerate with `aip-skillbench convert --task {task} --from {from_.value} --force`):\n  - "
+            + "\n  - ".join(failures)
+        )
+    return conv
 
 
 def _require_aip() -> Path:
@@ -222,24 +252,33 @@ def eval(
     sandbox: str = typer.Option("docker", help="docker | daytona | modal."),
     concurrency: int = typer.Option(4),
     jobs_dir: Path = typer.Option(None, help="Override jobs/ output dir."),
-    install_aip: bool = typer.Option(
-        True, "--install-aip/--no-install-aip",
-        help="AIP modes: install the `aip` CLI in the trial container so the agent runs the "
-             "procedure through the protocol client (`aip run`). Off = agent executes the graph itself.",
-    ),
     decision_model: bool = typer.Option(
         False, "--decision-model/--no-decision-model",
-        help="AIP modes: forward TYPESAFE_API_KEY from .env so decision steps are answered by the "
-             "System One model. Off = the agent answers decision questions itself at each pause.",
+        help="aip-runtime only: give the in-container aip server TYPESAFE_API_KEY from .env so "
+             "decision steps are answered by the decision model. Off = the solver answers each pause.",
     ),
     aip_nudge: bool = typer.Option(
-        False, "--aip-nudge/--no-aip-nudge",
-        help="AIP modes: also write a ~/.claude/CLAUDE.md memory in the sandbox telling the agent "
-             "to drive AIP skills through `aip run`. Off = only the skill's runtime block says so.",
+        True, "--aip-nudge/--no-aip-nudge",
+        help="aip-spec / aip-runtime: write that mode's ~/.claude/CLAUDE.md memory in the sandbox. "
+             "--no-aip-nudge is the ablation.",
     ),
 ) -> None:
-    """Run one evaluation in one of the five modes."""
+    """Run one evaluation in one mode."""
     task_dir = _task_dir(task)
+    if mode is Mode.model_dist:
+        raise typer.BadParameter(MODEL_DIST_NOT_IMPLEMENTED, param_hint="'--mode'")
+    if mode is Mode.aip_from_curated:
+        typer.echo(
+            "note: --mode aip-from-curated is a deprecated alias of aip-runtime; "
+            "proceeding as aip-runtime.",
+            err=True,
+        )
+        mode = Mode.aip_runtime
+    if decision_model and mode is not Mode.aip_runtime:
+        raise typer.BadParameter(
+            f"--decision-model applies only to --mode aip-runtime (got {mode.value})",
+            param_hint="'--decision-model'",
+        )
     out = jobs_dir or (JOBS_DIR / f"{task}-{mode.value}-{model}")
     env: dict[str, str] = {}
 
@@ -261,39 +300,46 @@ def eval(
         # Pin skill-creator to the SkillsBench-vendored copy for reproducibility,
         # regardless of what's in the user's ~/.claude/skills/.
         extra = ["--skill-mode", "self-gen", "--skill-creator-dir", str(_require_skill_creator())]
-    elif mode in (Mode.aip_from_instruction, Mode.aip_from_curated):
-        from_ = (
-            ConvertFrom.instruction if mode is Mode.aip_from_instruction
-            else ConvertFrom.curated
-        )
-        conv = _generated_skills_dir(task, from_)
-        if not conv.exists() or not any(conv.iterdir()):
+    elif mode is Mode.aip_from_instruction:
+        extra = ["--skills-dir", str(_checked_pack(task, ConvertFrom.instruction))]
+    elif mode is Mode.aip_spec:
+        # The pack mounted as a skill; its runtime block has the solver execute the graph.
+        extra = ["--skills-dir", str(_checked_pack(task, ConvertFrom.curated))]
+        if aip_nudge:
+            env[NUDGE_ENV] = mode.value
+    elif mode is Mode.aip_runtime:
+        # Nothing task-specific mounted: only the aip-runtime skill. The pack is
+        # published to an aip server inside the container (see _benchflow_patch).
+        pack_root = _checked_pack(task, ConvertFrom.curated)
+        packs = skill_dirs(pack_root)
+        if len(packs) != 1:
             raise typer.BadParameter(
-                f"No converted skills at {conv}. Run "
-                f"`aip-skillbench convert --task {task} --from {from_.value}` first."
+                f"aip-runtime publishes one procedure per task, but {pack_root} holds "
+                f"{len(packs)} skill folders ({', '.join(p.name for p in packs)}). Re-author with "
+                f"`aip-skillbench convert --task {task} --from curated --single --force`."
             )
-        failures = validate_packs(conv)
-        if failures:
+        runtime_skills = runtime_skill_dir()
+        if not (runtime_skills / "aip-runtime" / "SKILL.md").exists():
             raise typer.BadParameter(
-                "AIP pack does not validate against the bootstrapped AIP format "
-                f"(regenerate with `aip-skillbench convert --task {task} --from {from_.value} --force`):\n  - "
-                + "\n  - ".join(failures)
+                f"no aip-runtime skill at {runtime_skills}; run `aip-skillbench bootstrap --force`"
             )
-        extra = ["--skills-dir", str(conv)]
-        if install_aip:
-            try:
-                env[WHEEL_ENV] = f"{aip_spec_wheel()}:{aip_wheel()}"
-            except FileNotFoundError as err:
-                raise typer.BadParameter(str(err)) from err
-            if aip_nudge:
-                env[NUDGE_ENV] = "1"
-        elif aip_nudge:
-            raise typer.BadParameter("--aip-nudge needs --install-aip")
+        try:
+            env[WHEEL_ENV] = f"{aip_spec_wheel()}:{aip_wheel()}"
+        except FileNotFoundError as err:
+            raise typer.BadParameter(str(err)) from err
+        env[SERVER_ENV] = "1"
+        env[PUBLISH_ENV] = str(packs[0])
+        if aip_nudge:
+            env[NUDGE_ENV] = mode.value
         if decision_model:
             key = _read_dotenv(ROOT / ".env").get("TYPESAFE_API_KEY") or os.environ.get("TYPESAFE_API_KEY")
             if not key:
                 raise typer.BadParameter("--decision-model needs TYPESAFE_API_KEY in .env or the environment")
-            extra += ["--agent-env", f"TYPESAFE_API_KEY={key}"]
+            env[SERVER_EXTRA_ENV] = json.dumps({"TYPESAFE_API_KEY": key})
+        extra = [
+            "--skills-dir", str(runtime_skills),
+            "--agent-env", f"AIP_SERVER={AIP_SERVER_URL}",
+        ]
     else:
         raise typer.BadParameter(f"unknown mode: {mode}")
 
@@ -653,7 +699,7 @@ def run_matrix_cmd(
         [], "--model", help="Repeatable. Model string (agent-specific)."
     ),
     modes_explicit: list[Mode] = typer.Option(
-        [], "--mode", case_sensitive=False, help="Repeatable. Default: all 5 modes."
+        [], "--mode", case_sensitive=False, help="Repeatable. Default: every implemented mode."
     ),
     trials: Optional[int] = typer.Option(
         None, "--trials", help="Trials per (task, model, mode). Default 1."
@@ -674,13 +720,13 @@ def run_matrix_cmd(
     shuffle: bool = typer.Option(False, "--shuffle", help="Randomize cell execution order."),
     decision_model: Optional[bool] = typer.Option(
         None, "--decision-model/--no-decision-model",
-        help="AIP modes: answer decision steps with the System One model (TYPESAFE_API_KEY). "
-             "Config key `decision_model`. Default off.",
+        help="aip-runtime only: give the in-container server TYPESAFE_API_KEY so decision steps "
+             "are answered by the decision model. Config key `decision_model`. Default off.",
     ),
     aip_nudge: Optional[bool] = typer.Option(
         None, "--aip-nudge/--no-aip-nudge",
-        help="AIP modes: seed a ~/.claude/CLAUDE.md memory telling the solver to run AIP skills "
-             "through `aip run`. Config key `aip_nudge`. Default off.",
+        help="aip-spec / aip-runtime: seed that mode's ~/.claude/CLAUDE.md memory in the sandbox. "
+             "Config key `aip_nudge`. Default on; --no-aip-nudge is the ablation.",
     ),
 ) -> None:
     """Run a (task × model × mode × trial) eval matrix concurrently with live progress."""
@@ -711,7 +757,7 @@ def run_matrix_cmd(
     decision_resolved = (
         decision_model if decision_model is not None else bool(cfg.get("decision_model", False))
     )
-    nudge_resolved = aip_nudge if aip_nudge is not None else bool(cfg.get("aip_nudge", False))
+    nudge_resolved = aip_nudge if aip_nudge is not None else bool(cfg.get("aip_nudge", True))
 
     rc = run_matrix(
         tasks=tasks_resolved,

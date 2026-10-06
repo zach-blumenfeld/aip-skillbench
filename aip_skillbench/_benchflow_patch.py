@@ -25,9 +25,14 @@ CLI entry point (and the `bench` subprocess via `_bench_launcher`) gets them.
      with `setsid nohup`, so it outlives the `docker compose exec` that started
      it, and waits up to 60 s for /catalog. Timing key `aip_server`. Scripts run
      by the server run as root (the solver is the sandbox user).
+     `AIP_SKILLBENCH_SERVER_ENV` (JSON object) is extra environment for the
+     server process only, e.g. `TYPESAFE_API_KEY` under `--decision-model`.
    - `AIP_SKILLBENCH_PUBLISH` (host path of one skill folder): uploaded to
      /opt/aip/packs/<name> and published with `aip publish`; the printed
      `name@revision` goes to the log. Timing key `aip_publish`.
+   - `AIP_SKILLBENCH_NUDGE` (`aip-spec` or `aip-runtime`): writes that mode's
+     memory file to /root/.claude/CLAUDE.md, which benchflow copies into the
+     sandbox user's home. Independent of the wheels (`aip-spec` installs none).
    Any failure raises: an AIP-mode trial without its client, server, or
    procedure is a different experimental condition and must not pass silently.
 
@@ -37,6 +42,7 @@ the import.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shlex
@@ -47,13 +53,19 @@ from typing import Any
 from benchflow import rollout as _rollout
 from benchflow import sdk as _sdk
 
-from aip_skillbench._aip import NUDGE_ENV, PUBLISH_ENV, SERVER_ENV, WHEEL_ENV
+from aip_skillbench._aip import (
+    AIP_SERVER_PORT,
+    AIP_SERVER_URL,
+    NUDGE_ENV,
+    PUBLISH_ENV,
+    SERVER_ENV,
+    SERVER_EXTRA_ENV,
+    WHEEL_ENV,
+)
 
 logger = logging.getLogger(__name__)
 
 AIP_VENV = "/opt/aip"
-AIP_SERVER_PORT = 8000
-AIP_SERVER_URL = f"http://127.0.0.1:{AIP_SERVER_PORT}"
 AIP_PACKS_DIR = f"{AIP_VENV}/packs"
 # Runtime dependencies of the two wheels plus aip's `server` extra (neo4j omitted:
 # the server runs the filesystem backend).
@@ -143,16 +155,28 @@ def publish_script(pack: str) -> str:
 
 # Copied into /home/<sandbox_user>/.claude/ by benchflow's setup_sandbox_user (the
 # .claude dir is one of the home dirs it materialises from /root), where Claude Code
-# loads it as user memory.
-_NUDGE_MEMORY = """\
-# AIP skills
+# loads it as user memory. One text per AIP mode, kept equally short and directive;
+# `human-curated` gets none.
+NUDGE_MEMORY = {
+    "aip-spec": """\
+# AIP procedures
 
-The `aip` CLI is installed on this machine. When a skill's SKILL.md contains an
-AIP runtime block, run the procedure through it exactly as the block says:
-`aip run <skill folder> --input <start.json>`, then `aip resume` at each pause,
-until the output has "done": true. Do not execute the steps by hand when `aip`
-is available.
-"""
+A skill under `~/.claude/skills/` whose SKILL.md begins with an AIP runtime block is
+a procedure graph. Execute it exactly as that block says: the start step first, each
+execution step's script with the JSON state on stdin, follow `inputs_to` and routers,
+answer decision questions yourself. Do not skip steps and do not write your own
+solution instead.
+""",
+    "aip-runtime": """\
+# AIP procedures
+
+An AIP server is running and `AIP_SERVER` is set. Before solving a task, follow the
+`aip-runtime` skill: `aip search` with the task's words, `aip info` the match,
+`aip run <name> --input start.json`, and answer each pause with `aip resume`. Do not
+execute a procedure's steps by hand and do not write your own solution when a
+procedure matches.
+""",
+}
 
 _NUDGE_SCRIPT = r"""
 set -e
@@ -160,7 +184,7 @@ mkdir -p /root/.claude
 cat > /root/.claude/CLAUDE.md <<'EOF'
 {memory}EOF
 chmod 644 /root/.claude/CLAUDE.md
-echo "aip nudge written to /root/.claude/CLAUDE.md"
+echo "aip memory ({mode}) written to /root/.claude/CLAUDE.md"
 """
 
 
@@ -186,8 +210,10 @@ async def _install_aip(env: Any, wheels: list[Path]) -> None:
     logger.info("aip-skillbench: %s", out.splitlines()[-1] if out else "aip installed")
 
 
-async def _start_aip_server(env: Any) -> None:
-    out = await _exec_or_raise(env, "aip server start", server_script(), timeout_sec=120)
+async def _start_aip_server(env: Any, server_env: dict[str, str]) -> None:
+    out = await _exec_or_raise(
+        env, "aip server start", server_script(server_env), timeout_sec=120
+    )
     logger.info("aip-skillbench: %s", out.splitlines()[-1] if out else "aip server ready")
 
 
@@ -235,8 +261,9 @@ async def _patched_start_env_and_upload(
     if os.environ.get(SERVER_ENV) == "1":
         if not wheels:
             raise RuntimeError(f"{SERVER_ENV}=1 needs {WHEEL_ENV}")
+        server_env = json.loads(os.environ.get(SERVER_EXTRA_ENV) or "{}")
         t1 = datetime.now()
-        await _start_aip_server(env)
+        await _start_aip_server(env, server_env)
         timing["aip_server"] = (datetime.now() - t1).total_seconds()
     pack = os.environ.get(PUBLISH_ENV)
     if pack:
@@ -245,11 +272,17 @@ async def _patched_start_env_and_upload(
         t1 = datetime.now()
         await _publish_pack(env, Path(pack))
         timing["aip_publish"] = (datetime.now() - t1).total_seconds()
-    if wheels and os.environ.get(NUDGE_ENV) == "1":
-        result = await env.exec(_NUDGE_SCRIPT.format(memory=_NUDGE_MEMORY), timeout_sec=30)
-        if getattr(result, "return_code", 0) != 0:
-            raise RuntimeError(f"aip nudge write failed: {getattr(result, 'stderr', '')}")
-        timing["aip_nudge"] = True
+    nudge = os.environ.get(NUDGE_ENV)
+    if nudge:
+        if nudge not in NUDGE_MEMORY:
+            raise RuntimeError(f"{NUDGE_ENV}={nudge!r}; expected one of {sorted(NUDGE_MEMORY)}")
+        script = _NUDGE_SCRIPT.format(memory=NUDGE_MEMORY[nudge], mode=nudge)
+        t1 = datetime.now()
+        out = await _exec_or_raise(env, "aip memory write", script, timeout_sec=30)
+        logger.info("aip-skillbench: %s", out.splitlines()[-1] if out else "aip memory written")
+        # Seconds, like every timing value (benchflow rounds them). Not an `aip_*` key:
+        # those mark the protocol setup of `aip-runtime`.
+        timing["memory_file"] = (datetime.now() - t1).total_seconds()
 
 
 _rollout._start_env_and_upload = _patched_start_env_and_upload

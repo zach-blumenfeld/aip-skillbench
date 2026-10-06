@@ -20,19 +20,26 @@ SkillsBench is a containerized benchmark — 84+ tasks across 11 domains, run vi
 
 See the paper for the comparative findings across model + harness configurations.
 
-**We add two AIP modes here**, both experimental: 
-4. **AIP from instruction** (mode 4) and 
-5. **AIP from human-curated** (mode 5). 
+**We add AIP modes here**, all experimental. AIP is a **Spec** (a procedure serialized
+as an Agent Skill with a runtime block and a typed YAML graph) and a **Runtime
+Protocol** (a client-server architecture that executes the graph and enforces
+sequencing and typed I/O). An Opus author compiles each task's curated skills once
+into one AIP pack via the [AIP authoring skill](https://github.com/zach-blumenfeld/aip-spec),
+the pack is committed, and every trial uses the same bytes — AIP's
+author-once-consume-many pattern. Two modes measure the two halves on those bytes:
 
-Both 4 & 5 use Opus 4.7 to author once via the [AIP skill](https://github.com/zach-blumenfeld/aip), commit the result, and mount it across all trials — matching AIP's author-once-consume-many design pattern.
-
-| # | Mode | Skill source |
+| Mode | In the trial container | Measures |
 |---|---|---|
-| 1 | `noskill` | none |
-| 2 | `human-curated` | task's bundled human-authored skill |
-| 3 | `selfgen-skill-creator` | model writes its own skill at trial time (paper-style self-gen) |
-| 4 | `aip-from-instruction` | Opus 4.7 authors an AIP skill from `instruction.md` alone, locked & committed |
-| 5 | `aip-from-curated` | Opus 4.7 converts the human-authored skill to AIP, locked & committed |
+| `noskill` | nothing | baseline |
+| `human-curated` | the task's bundled human-authored skills | the "With Skills" condition |
+| `selfgen-skill-creator` | a skill the model writes at trial time (paper-style self-gen) | self-generation |
+| `aip-from-instruction` | an AIP pack authored from `instruction.md` alone | authoring without curated input |
+| `aip-spec` | the AIP pack mounted as a skill, plus the `aip-spec` memory file | the Spec: the solver executes the graph itself |
+| `aip-runtime` | only the generic `aip-runtime` skill; the pack is published to an `aip server` in the container; `AIP_SERVER` set; the `aip-runtime` memory file | the Protocol: `aip search` → `aip run <name>` → answer pauses |
+| `model-dist` | — | placeholder, not implemented (exits with an error) |
+
+`aip-from-curated` is a deprecated alias of `aip-runtime` (it remains the pack
+directory name, `generated-skills/<task>/aip-from-curated/`).
 
 
 See [skill-modes.md](skill-modes.md) for the full runbook.
@@ -42,7 +49,7 @@ See [skill-modes.md](skill-modes.md) for the full runbook.
 ```
 aip-skillbench/
 ├── aip_skillbench/                # CLI package
-├── generated-skills/              # AIP authoring outputs for modes 4 & 5 (committed)
+├── generated-skills/              # AIP packs and authoring records (committed)
 ├── jobs/                          # bench run outputs (gitignored)
 ├── vendor/skillsbench/            # submodule of benchflow-ai/skillsbench (read-only)
 ├── build/aip/                     # aip + aip-spec wheels built by `bootstrap`, installed into trial containers (gitignored)
@@ -53,7 +60,7 @@ aip-skillbench/
 
 `generated-skills/AIP_REF.json` records the remote, ref, and commit of both `aip` and `aip-spec`, and the format version, the cohort was authored against; `bootstrap` writes it and it is committed with the cohort.
 
-`vendor/` and `.claude/` are read-only — never write into them. Mode 4 & 5 conversion artifacts go to `generated-skills/<task>/aip-from-{instruction,curated}/<skill>/`.
+`vendor/` and `.claude/` are read-only — never write into them. AIP conversion artifacts go to `generated-skills/<task>/aip-from-{instruction,curated}/<skill>/`.
 
 ## Quickstart
 
@@ -89,9 +96,13 @@ runs it with `aip run <name>`. `timing.json` records `aip_install`, `aip_server`
 `aip_publish`; any setup failure fails the trial rather than silently changing the
 condition. Scripts run by the server run as root; in `aip-spec` they run as the
 solver. Decision steps are answered by the solver at each pause; `--decision-model`
-(`aip-runtime` only) would give the server a `TYPESAFE_API_KEY`. `--aip-nudge` seeds a
-`~/.claude/CLAUDE.md` memory in the sandbox (`run-matrix` config key `aip_nudge`).
-All of these are experimental conditions: record them with the run.
+(`aip-runtime` only; refused elsewhere) gives the server process, not the agent, a
+`TYPESAFE_API_KEY`. Both AIP modes seed a mode-specific `~/.claude/CLAUDE.md` memory in
+the sandbox (texts side by side in `_benchflow_patch.NUDGE_MEMORY`); `human-curated`
+gets none, and `--no-aip-nudge` (`run-matrix` config key `aip_nudge: false`) is the
+ablation. `aip-runtime` mounts and publishes one procedure, so its pack must hold a
+single skill folder (`convert --single`). All of these are experimental conditions:
+record them with the run.
 
 `eval` and `run-matrix` refuse packs that do not validate against the bootstrapped
 AIP format, so a cohort authored against an older format must be regenerated
@@ -120,23 +131,24 @@ aip-skillbench eval --task 3d-scan-calc --model claude-haiku-4-5 --mode noskill
 aip-skillbench eval --task 3d-scan-calc --model claude-haiku-4-5 --mode human-curated
 aip-skillbench eval --task 3d-scan-calc --model claude-haiku-4-5 --mode selfgen-skill-creator
 
-# Modes 4 & 5 — author once (Opus, committed), then eval any model.
+# AIP modes — author once (Opus, committed), then eval any model.
 aip-skillbench convert --task 3d-scan-calc --from instruction
 aip-skillbench eval    --task 3d-scan-calc --model claude-haiku-4-5 --mode aip-from-instruction
 
-aip-skillbench convert --task 3d-scan-calc --from curated            # one AIP skill per curated skill
 aip-skillbench convert --task 3d-scan-calc --from curated --single   # all curated skills -> one procedure
-aip-skillbench eval    --task 3d-scan-calc --model claude-haiku-4-5 --mode aip-from-curated
-aip-skillbench eval    --task 3d-scan-calc --model claude-haiku-4-5 --mode aip-from-curated --decision-model
+aip-skillbench eval    --task 3d-scan-calc --model claude-haiku-4-5 --mode aip-spec
+aip-skillbench eval    --task 3d-scan-calc --model claude-haiku-4-5 --mode aip-runtime
+aip-skillbench eval    --task 3d-scan-calc --model claude-haiku-4-5 --mode aip-runtime --no-aip-nudge     # memory-file ablation
+aip-skillbench eval    --task 3d-scan-calc --model claude-haiku-4-5 --mode aip-runtime --decision-model   # server answers decisions
 
-# Author modes 4 & 5 in bulk — parallel claude -p calls, skips already-done outputs.
+# Author in bulk — parallel claude -p calls, skips already-done outputs.
 aip-skillbench batch-convert --task 3d-scan-calc --task earthquake-phase-association \
                              --from both --concurrency 4
 # Or convert all 95 tasks at once (default pattern is "*"):
 aip-skillbench batch-convert --from both --concurrency 4
 
 # Inspect results
-aip-skillbench reward jobs/3d-scan-calc-aip-from-curated-claude-haiku-4-5/<timestamp>/
+aip-skillbench reward jobs/3d-scan-calc-aip-runtime-claude-haiku-4-5/<timestamp>/
 ```
 
 See [skill-modes.md](skill-modes.md) for each mode's authoring input, container mount paths, audit signals, and reference runs.
@@ -173,9 +185,9 @@ Each agent reads its own API key from `.env` (`ANTHROPIC_API_KEY`, `OPENAI_API_K
 
 ## Known limitations
 
-- **AIP authoring is Anthropic-only.** `aip-skillbench convert` (modes 4 & 5) shells out to Claude Code (`claude -p`) and defaults to `claude-opus-4-7` per AIP guidance. Authoring with OpenAI / Google models would require an adapter that mounts the AIP skill in those harnesses' prompt format. Solver evaluation is not restricted — see above.
+- **AIP authoring is Anthropic-only.** `aip-skillbench convert` shells out to Claude Code (`claude -p`) and defaults to `claude-opus-4-7` per AIP guidance. Authoring with OpenAI / Google models would require an adapter that mounts the AIP skill in those harnesses' prompt format. Solver evaluation is not restricted — see above.
 
-- **Mode 5 (`aip-from-curated`) converts each curated skill in isolation, 1:1.** `_convert_from_curated` loops over every skill dir under the task's `environment/skills/` and makes a *separate* `claude -p` call per skill (`cli.py`), so a task with N human-authored skills always yields exactly N AIP skills with the same names. Each conversion is blind to the others, so the authoring model **cannot consolidate** a fragmented skill set (e.g. earthquake-phase-association's 4 seismology skills stay 4). This is a hard property of the per-skill loop, independent of the conversion prompt or the AIP skill's own guidance. Mode 4 (`aip-from-instruction`) has no such constraint — it gets one call and chooses its own skill count. To allow mode-5 consolidation you'd change the loop to pass all skill dirs into a single call.
+- **Without `--single`, `convert --from curated` converts each curated skill in isolation, 1:1.** `_convert_from_curated` loops over every skill dir under the task's `environment/skills/` and makes a *separate* `claude -p` call per skill (`cli.py`), so a task with N human-authored skills always yields exactly N AIP skills with the same names. Each conversion is blind to the others, so the authoring model **cannot consolidate** a fragmented skill set (e.g. earthquake-phase-association's 4 seismology skills stay 4). This is a hard property of the per-skill loop, independent of the conversion prompt or the AIP skill's own guidance. Mode 4 (`aip-from-instruction`) has no such constraint — it gets one call and chooses its own skill count. `--single` passes all skill dirs into a single call and is what `aip-spec` / `aip-runtime` use.
 
-- **Token usage is not captured.** benchflow and the `claude-agent-acp` harness don't persist token counts; `result.json` records only `n_tool_calls`, `n_prompts`, and `timing`. So the per-cell "effort" proxies are tool calls and wall clock — not tokens or dollar cost. Aggregate tokens can be read after the fact from the Anthropic Console / Usage API by model + run time-window (since both eval and authoring bill the `.env` key), but not per `(task, mode, trial)`. **Future:** true per-cell token/cost accounting — which would let us compare modes on token efficiency, not just wall clock (e.g. confirm whether `aip-from-curated` is genuinely cheaper than `human-curated`, not just faster) — needs either a logging proxy via `ANTHROPIC_BASE_URL` or a benchflow patch to surface usage from the ACP model-response events into `result.json`.
+- **Token usage is not captured.** benchflow and the `claude-agent-acp` harness don't persist token counts; `result.json` records only `n_tool_calls`, `n_prompts`, and `timing`. So the per-cell "effort" proxies are tool calls and wall clock — not tokens or dollar cost. Aggregate tokens can be read after the fact from the Anthropic Console / Usage API by model + run time-window (since both eval and authoring bill the `.env` key), but not per `(task, mode, trial)`. **Future:** true per-cell token/cost accounting — which would let us compare modes on token efficiency, not just wall clock (e.g. confirm whether the AIP modes are genuinely cheaper than `human-curated`, not just faster) — needs either a logging proxy via `ANTHROPIC_BASE_URL` or a benchflow patch to surface usage from the ACP model-response events into `result.json`.
 

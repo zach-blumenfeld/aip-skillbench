@@ -22,6 +22,8 @@ from rich.live import Live
 from rich.table import Table
 from rich.text import Text
 
+from aip_skillbench._aip import read_aip_ref
+
 ROOT = Path(__file__).resolve().parents[1]
 VENDOR_SKILLSBENCH = ROOT / "vendor" / "skillsbench"
 GENERATED_SKILLS = ROOT / "generated-skills"
@@ -32,10 +34,15 @@ class Mode(str, Enum):
     human_curated = "human-curated"
     selfgen_skill_creator = "selfgen-skill-creator"
     aip_from_instruction = "aip-from-instruction"
+    aip_spec = "aip-spec"
+    aip_runtime = "aip-runtime"
+    model_dist = "model-dist"
+    # Deprecated alias of aip-runtime (kept in sync with cli.Mode).
     aip_from_curated = "aip-from-curated"
 
 
-ALL_MODES: list[Mode] = list(Mode)
+# The default mode set: every implemented mode, without the deprecated alias.
+ALL_MODES: list[Mode] = [m for m in Mode if m not in (Mode.model_dist, Mode.aip_from_curated)]
 
 
 AGENT_KEY_ENV = {
@@ -49,6 +56,9 @@ MODE_LABEL = {
     Mode.human_curated: "human",
     Mode.selfgen_skill_creator: "selfgen",
     Mode.aip_from_instruction: "aip-inst",
+    Mode.aip_spec: "aip-spec",
+    Mode.aip_runtime: "aip-rt",
+    Mode.model_dist: "model-dist",
     Mode.aip_from_curated: "aip-cur",
 }
 
@@ -177,10 +187,15 @@ def _validate_tasks(tasks: list[str]) -> None:
 
 
 def _validate_generated_skills(tasks: list[str], modes: list[Mode]) -> None:
+    if Mode.model_dist in modes:
+        raise typer.BadParameter(
+            "mode model-dist: not implemented; see prompts/modes-plan.md Appendix A"
+        )
     needs: list[tuple[str, str]] = []
     if Mode.aip_from_instruction in modes:
         needs.extend((t, "aip-from-instruction") for t in tasks)
-    if Mode.aip_from_curated in modes:
+    # aip-spec and aip-runtime (and its alias) use the same pack bytes.
+    if {Mode.aip_spec, Mode.aip_runtime, Mode.aip_from_curated} & set(modes):
         needs.extend((t, "aip-from-curated") for t in tasks)
     missing: list[str] = []
     for task, sub in needs:
@@ -275,7 +290,7 @@ def _find_result_json(cell_jobs_dir: Path) -> Optional[Path]:
 def _run_cell(
     cell: Cell, out: Path, agent: str, sandbox: str, state: MatrixState,
     decision_model: bool = False,
-    aip_nudge: bool = False,
+    aip_nudge: bool = True,
 ) -> CellResult:
     state.mark_running(cell)
     cell_jobs_dir = out / "cells" / cell.safe_name
@@ -293,10 +308,11 @@ def _run_cell(
         "--concurrency", "1",
         "--jobs-dir", str(cell_jobs_dir),
     ]
-    if decision_model:
+    # eval refuses --decision-model outside aip-runtime, so it applies to those cells only.
+    if decision_model and cell.mode in (Mode.aip_runtime.value, Mode.aip_from_curated.value):
         cmd.append("--decision-model")
-    if aip_nudge:
-        cmd.append("--aip-nudge")
+    if not aip_nudge:
+        cmd.append("--no-aip-nudge")
     started_at = datetime.now().isoformat()
     with open(log_path, "w") as logf:
         logf.write("$ " + " ".join(cmd) + "\n\n")
@@ -430,7 +446,7 @@ def run_matrix(
     force: bool,
     shuffle: bool,
     decision_model: bool = False,
-    aip_nudge: bool = False,
+    aip_nudge: bool = True,
 ) -> int:
     if not tasks:
         raise typer.BadParameter("no tasks specified (use --task ... or --config)")
@@ -477,6 +493,7 @@ def run_matrix(
             time.sleep(1)
         typer.echo()
 
+    aip_ref = read_aip_ref()
     (out / "campaign.json").write_text(
         json.dumps(
             {
@@ -490,6 +507,8 @@ def run_matrix(
                 "sandbox": sandbox,
                 "decision_model": decision_model,
                 "aip_nudge": aip_nudge,
+                "aip_version": aip_ref.get("aip_version"),
+                "aip_ref": aip_ref,
                 "total_cells": len(cells),
                 "already_done_at_start": len(done),
                 "to_run": len(pending),

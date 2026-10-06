@@ -34,15 +34,23 @@ HOST_SKILLS_DIR = ROOT / "build" / "skills"
 GENERATED_SKILLS = ROOT / "generated-skills"
 AIP_REF_FILE = GENERATED_SKILLS / "AIP_REF.json"
 
+# Where the in-container `aip server` listens (aip-runtime mode); the agent gets
+# AIP_SERVER set to this.
+AIP_SERVER_PORT = 8000
+AIP_SERVER_URL = f"http://127.0.0.1:{AIP_SERVER_PORT}"
+
 # Env vars read by aip_skillbench._benchflow_patch inside the `bench` subprocess.
 # Colon-separated host paths of the aip-spec and aip wheels to install in the container.
 WHEEL_ENV = "AIP_SKILLBENCH_WHEELS"
 # "1" to start `aip server` in the container (needs WHEEL_ENV).
 SERVER_ENV = "AIP_SKILLBENCH_SERVER"
+# JSON object of extra environment for the server process only (e.g. TYPESAFE_API_KEY
+# under `--decision-model`); never given to the agent.
+SERVER_EXTRA_ENV = "AIP_SKILLBENCH_SERVER_ENV"
 # Host path of one skill folder to publish to that server (needs SERVER_ENV).
 PUBLISH_ENV = "AIP_SKILLBENCH_PUBLISH"
-# Set to "1" to also write a CLAUDE.md memory in the sandbox user's home telling the
-# agent to drive AIP skills through `aip run` (an explicit experimental condition).
+# Mode name (`aip-spec` or `aip-runtime`): write that mode's CLAUDE.md memory in the
+# sandbox user's home. Unset = no memory (`--no-aip-nudge`, and every other mode).
 NUDGE_ENV = "AIP_SKILLBENCH_NUDGE"
 
 
