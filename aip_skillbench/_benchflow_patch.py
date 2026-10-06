@@ -159,32 +159,43 @@ def publish_script(pack: str) -> str:
 # `human-curated` gets none.
 NUDGE_MEMORY = {
     "aip-spec": """\
-# AIP procedures
+# AIP procedures (mandatory)
 
-A skill under `~/.claude/skills/` whose SKILL.md begins with an AIP runtime block is
-a procedure graph. Execute it exactly as that block says: the start step first, each
-execution step's script with the JSON state on stdin, follow `inputs_to` and routers,
-answer decision questions yourself. Do not skip steps and do not write your own
-solution instead.
+Your FIRST action on any task, before reading data or writing code: look at the skills
+under `~/.claude/skills/`. A skill whose SKILL.md begins with an AIP runtime block is a
+procedure graph for a task like this. If one matches the task, you MUST execute it
+exactly as the runtime block says: the start step first, each execution step's
+script with the JSON state on stdin, follow `inputs_to` and routers, answer decision
+questions yourself, and report the result from its end state. Do not skip steps and
+do not write your own solution instead. Only if no skill matches do you solve the
+task yourself.
 """,
     "aip-runtime": """\
-# AIP procedures
+# AIP procedures (mandatory)
 
-An AIP server is running and `AIP_SERVER` is set. Before solving a task, follow the
-`aip-runtime` skill: `aip search` with the task's words, `aip info` the match,
-`aip run <name> --input start.json`, and answer each pause with `aip resume`. Do not
-execute a procedure's steps by hand and do not write your own solution when a
-procedure matches.
+An AIP server is running and `AIP_SERVER` is set. Your FIRST action on any task,
+before reading data or writing code: run `aip search "<a few words from the task>"`.
+If a published procedure matches the task, you MUST use it exactly as the
+`aip-runtime` skill says: `aip info <name>`, write its start input, `aip run <name>
+--input start.json`, answer each pause with `aip resume`, and report the result from
+its final state. Do not execute a procedure's steps by hand and do not write your own
+solution when a procedure matches. Only if the search finds nothing that matches do
+you solve the task yourself.
 """,
 }
 
 _NUDGE_SCRIPT = r"""
 set -e
+# Two copies so the solver cannot miss it: the user memory (benchflow copies
+# /root/.claude into /home/<user>/.claude when it creates the sandbox user) and the
+# project memory in the agent's working directory, which Claude Code always loads.
+WD="$(pwd)"
 mkdir -p /root/.claude
 cat > /root/.claude/CLAUDE.md <<'EOF'
 {memory}EOF
 chmod 644 /root/.claude/CLAUDE.md
-echo "aip memory ({mode}) written to /root/.claude/CLAUDE.md"
+cp /root/.claude/CLAUDE.md "$WD/CLAUDE.md" && chmod 644 "$WD/CLAUDE.md"
+echo "aip memory ({mode}) written to /root/.claude/CLAUDE.md and $WD/CLAUDE.md"
 """
 
 
