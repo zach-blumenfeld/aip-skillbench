@@ -349,15 +349,27 @@ def eval(
 _CHECKLIST_NOTE = """\
 Follow the aip skill's "Authoring an Agent Skill" checklist end to end: source/
 materials, SKILL.md with the verbatim runtime block and one fenced YAML procedure,
-`aip validate` after every edit (the `aip` CLI is on PATH), the line-by-line
-completeness check against the sources, and the functional test with `aip run`
-using realistic start inputs. Nobody is watching this session: do not ask
-questions, and skip the checklist's install step (write straight to the
-destination below). Everything you may read is under ./inputs/ and everything you
-write goes under ./out/; do not look anywhere else on this machine. Scripts run
+`aip-spec validate ./out/<skill-name>` after every edit (the `aip-spec` and `aip`
+CLIs are on PATH), the line-by-line completeness check against the sources, and the
+functional test: write realistic start inputs to ./scratch/start.json (test inputs
+never go inside the pack) and run `aip run ./out/<skill-name> --input
+./scratch/start.json`, answering each pause with `aip resume <run-file> --input
+<answer.json>`, through to the end step. Nobody is watching this session: do not ask
+questions, and skip the checklist's install step (write straight to the destination
+below). Everything you may read is under ./inputs/ and everything you write goes
+under ./out/ or ./scratch/; do not look anywhere else on this machine. Scripts run
 inside the task's container, so they must work with the packages that container
 provides (see ./inputs/environment/Dockerfile when present) or bootstrap their own
-environment; do not assume extra packages.\
+environment; do not assume extra packages. How `aip run` executes a script: it runs
+`<python> <script>` with cwd set to the script's folder and one JSON object on stdin
+({"currentState", "assets", "expects"}); stdout must be one JSON object. In the
+container that python has the container's system packages; in a local `aip run`
+here it is the aip CLI's own Python 3.14, which lacks the task's packages. If the
+functional test needs them: `uv venv --python 3.14 ./scratch/venv && uv pip install
+--python ./scratch/venv/bin/python <packages>`, then prefix the run with
+`PYTHONPATH="$(./scratch/venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')" aip run ...`
+(scripts inherit it). That is all you need to know about the aip installation; do not
+read its source.\
 """
 
 _PROMPT_FROM_CURATED = """\
@@ -383,7 +395,7 @@ Requirements:
 3. The skill must carry all the specialized knowledge and procedures an agent needs
    to solve this task type autonomously.
 
-Write nothing outside ./out/{name}/."""
+Write nothing outside ./out/{name}/ and ./scratch/."""
 
 
 _PROMPT_FROM_CURATED_SINGLE = """\
@@ -411,7 +423,7 @@ Requirements:
 3. The skill must carry all the specialized knowledge and procedures an agent needs
    to solve this task type autonomously.
 
-Write nothing outside ./out/."""
+Write nothing outside ./out/ and ./scratch/."""
 
 
 _PROMPT_FROM_INSTRUCTION = """\
@@ -435,7 +447,7 @@ Requirements:
    `<skill-name>` value(s); the directory name under ./out/ must match the
    skill's `name:` frontmatter.
 
-Write nothing outside ./out/."""
+Write nothing outside ./out/ and ./scratch/."""
 
 @app.command()
 def convert(

@@ -1,0 +1,28 @@
+{
+  "task": "earthquake-plate-calculation",
+  "from": "curated",
+  "label": "single",
+  "single": true,
+  "author_model": "claude-opus-4-7",
+  "claude_exit": 0,
+  "started_workspace": "earthquake-plate-calculation-curated-single-20261006-194017",
+  "recorded_at": "2026-10-06T19:49:41",
+  "produced": [
+    "earthquake-plate-distance"
+  ],
+  "aip": {
+    "aip": {
+      "remote": "git@github.com:zach-blumenfeld/aip.git",
+      "ref": "aip-0.5a0",
+      "sha": "9dee09cd7e450a708f9775664f0668e29853b365"
+    },
+    "aip_spec": {
+      "remote": "git@github.com:zach-blumenfeld/aip-spec.git",
+      "ref": "v0.5a1",
+      "sha": "7bdcc5af7418bf37eeb5f587592ac6c3633cb7d4"
+    },
+    "aip_version": "0.5a1",
+    "recorded_at": "2026-10-06T19:25:06"
+  },
+  "workspace": "/Users/zach/dev/aip-skillbench/build/authoring/earthquake-plate-calculation-curated-single-20261006-194017"
+}

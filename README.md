@@ -111,15 +111,16 @@ AIP format, so a cohort authored against an older format must be regenerated
 ### Sandboxed authoring
 
 `convert` runs the authoring session in a throwaway workspace under `build/authoring/`
-that contains only the aip skill, `./inputs/` (the curated skills and the task
-Dockerfile, or `instruction.md`), and an empty `./out/`. No `--add-dir` is granted and
+that contains only the aip-spec authoring skill (`build/skills/aip/`), `./inputs/` (the
+curated skills and the task Dockerfile, or `instruction.md`), an empty `./out/`, and a
+`./scratch/` for functional-test inputs (discarded). No `--add-dir` is granted and
 the prompt names only workspace-relative paths, so the task's `tests/` and
 `solution/` are not in view. The session still runs with permissions skipped (it has
-to execute `aip` and the scripts it writes), so enforcement is by audit: the full
+to execute `aip-spec validate`, `aip run`, and the scripts it writes), so enforcement is by audit: the full
 stream-json transcript is scanned and any tool call whose path fields reach outside
 the workspace (or mention `vendor/skillsbench`, `tests/`, `solution/`) fails the
-conversion. Prompt, transcript, `audit.json`, and `meta.json` (model, cost, aip
-commit) are kept in `generated-skills/<task>/_authoring/<from>/<label>/`, a sibling of
+conversion. Prompt, transcript, `audit.json`, and `meta.json` (author model, cost, the
+aip and aip-spec pins) are kept in `generated-skills/<task>/_authoring/<from>/<label>/`, a sibling of
 the mounted pack dir, so trials never see them and reviewers can check what the
 author read.
 

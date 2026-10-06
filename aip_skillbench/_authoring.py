@@ -4,12 +4,13 @@ The authoring session (`claude -p`) runs inside a throwaway workspace that holds
 only what the prompt is allowed to see:
 
     build/authoring/<task>-<from>-<stamp>/
-    ├── .claude/skills/aip/      copy of the bootstrapped aip skill (no .git, tests, scratch)
+    ├── .claude/skills/aip/      copy of the aip-spec authoring skill (build/skills/aip/)
     ├── inputs/
     │   ├── skills/<name>/…      curated skills            (--from curated)
     │   ├── environment/Dockerfile                          (--from curated)
     │   └── instruction.md                                  (--from instruction)
-    └── out/<skill-name>/…       what the author writes
+    ├── out/<skill-name>/…       what the author writes
+    └── scratch/                 functional-test inputs (not kept)
 
 No `--add-dir` is granted, the prompt only names workspace-relative paths, and the
 repo (with the task's tests/ and solution/) is nowhere in the session's view. Claude
@@ -31,16 +32,23 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from aip_skillbench._aip import AIP_SRC_DIR, ROOT, read_aip_ref
+from aip_skillbench._aip import HOST_SKILLS_DIR, ROOT, read_aip_ref
 
 AUTHORING_BUILD = ROOT / "build" / "authoring"
 
-_AIP_SKILL_IGNORE = shutil.ignore_patterns(".git", ".venv", "__pycache__", "tests", "scratch", ".idea", "*.pyc")
+_AIP_SKILL_IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store")
 _INPUT_IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store")
 
 # Paths a session may legitimately touch outside its workspace: interpreters, caches,
 # temp dirs, and the aip CLI it runs.
+# The AIP tool's own source: the host `aip`/`aip-spec` CLIs are editable installs of these
+# clones, so an author reading how the runtime invokes scripts lands here. Not task data.
+_TOOL_SRC_PREFIXES = tuple(
+    str(p) + "/" for p in (ROOT / ".claude" / "skills-src", ROOT / ".claude" / "skills")
+)
 _ALLOWED_PREFIXES = (
+    *_TOOL_SRC_PREFIXES,
+
     "/tmp/", "/private/tmp/", "/private/var/folders/", "/var/folders/",
     "/usr/", "/bin/", "/opt/", "/etc/", "/dev/", "/proc/", "/Library/", "/System/",
     str(Path.home() / ".cache") + "/", str(Path.home() / ".local") + "/",
@@ -48,7 +56,8 @@ _ALLOWED_PREFIXES = (
 )
 # Anything mentioning these is a violation regardless of prefix.
 _FORBIDDEN_FRAGMENTS = ("vendor/skillsbench", "/tests/", "/solution/", "test_outputs", "solve.sh")
-_PATH_RE = re.compile(r"(?<![\w.-])(/[^\s\"'`<>|;&()\[\]{}]+)")
+# A path right after `$(pwd)` or `${VAR}` is relative to that expansion, not absolute.
+_PATH_RE = re.compile(r"(?<![\w.)}-])(/[^\s\"'`<>|;&()\[\]{}]+)")
 
 
 class AuditViolation(Exception):
@@ -59,9 +68,10 @@ def make_workspace(task: str, from_: str) -> Path:
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     ws = AUTHORING_BUILD / f"{task}-{from_}-{stamp}"
     ws.mkdir(parents=True)
-    shutil.copytree(AIP_SRC_DIR, ws / ".claude" / "skills" / "aip", ignore=_AIP_SKILL_IGNORE, symlinks=True)
+    shutil.copytree(HOST_SKILLS_DIR / "aip", ws / ".claude" / "skills" / "aip", ignore=_AIP_SKILL_IGNORE, symlinks=True)
     (ws / "inputs").mkdir()
     (ws / "out").mkdir()
+    (ws / "scratch").mkdir()
     return ws
 
 
@@ -138,6 +148,8 @@ def _scan_text(text: str, ws_prefixes: tuple[str, ...]) -> list[str]:
             continue
         if "<" in p or ">" in p or "{" in p:
             continue
+        if "/" not in p[1:]:
+            continue  # a lone "/name" is a JSON pointer, a division, or a top-level dir, never a file we care about
         hits.append(p)
     return hits
 

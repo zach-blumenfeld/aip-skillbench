@@ -1,146 +1,115 @@
-# Source & compilation notes — earthquake-plate-distance
+# Source and compilation notes — `earthquake-plate-distance`
 
 ## Provenance
 
-This AIP skill was compiled from one curated Agent Skill bundled with the
-`earthquake-plate-calculation` SkillsBench task:
+Compiled from one curated Agent Skill:
 
-- `ORIGINAL_SKILL.md` — verbatim copy of
-  `vendor/skillsbench/tasks/earthquake-plate-calculation/environment/skills/geospatial-analysis/SKILL.md`.
+- `geospatial-analysis/SKILL.md` — a general geopandas guide (`gpd.read_file`,
+  CRS projection to `EPSG:4087`, `.within()` spatial filtering, `.distance()`
+  with `.unary_union`, `.nlargest()` extremum picks) that uses the exact
+  earthquake-near-plate-boundary workflow as its complete worked example.
 
-The task itself (`instruction.md`, `solution/solution.py`, `task.toml`,
-`environment/Dockerfile`, and the `PB2002_*.json` / `earthquakes_2024.json`
-fixtures) was consulted for the concrete I/O contract — file paths under
-`/root`, expected answer JSON keys, magnitude/place/time semantics, time
-formatting to ISO 8601 UTC, and distance rounding — but its source files are
-not copied here because they belong to the task, not the curated skill.
+The curated source is copied verbatim into `source/geospatial-analysis/`.
 
-The `geospatial-analysis` curated skill is domain-general (any point-to-line
-GeoPandas distance problem); this AIP compilation specialises it to the
-plate-tectonics workflow the task exercises while keeping the target plate
-and boundary filter parameterised via state inputs.
+The runtime environment is a Python 3.12 container with `pandas==2.2.3`,
+`numpy==1.26.4`, `geopandas==1.0.1`, `shapely==2.0.6`, `pyproj==3.7.0` and the
+three PB2002 / earthquake JSON files mounted at `/root/` (see
+`inputs/environment/Dockerfile`). The compiled skill assumes these packages are
+available; it does not bootstrap them.
+
+## Compilation target
+
+The curated skill is procedural guidance for a human reader. The task class it
+targets — "find the earthquake inside plate X that is furthest from (or
+closest to) that plate's boundary" — is a single deterministic pipeline over
+three well-known GeoJSON inputs. The compiled procedure therefore encodes the
+whole pipeline as one script and uses the client only where the client is
+unavoidable: parsing the user's natural-language request into typed
+parameters, and summarising the numeric result back in prose.
 
 ## Step-kind choices
 
-The whole procedure is deterministic once the inputs are given, so it
-compiles to one `execution` step plus `end`:
+Per the AIP spec, step kinds are chosen in order: script → decision → client
+task.
 
-- **`find-furthest` (`execution`)** — every operation in the curated skill's
-  "Common Workflow Pattern" (load, filter by polygon, project, union
-  boundaries, compute distances, `nlargest`, convert time, write JSON) is
-  pure code over declared inputs. No judgement, no free-form generation, no
-  branching on a value that only a model can produce, so it is a single
-  script per the AIP "Choose the Step Kind" guidance (deterministic
-  if/then/else and numeric calculation → `execution`).
-- **`end`** — declares the shape of the final state (`output_path`,
-  `result`).
+1. **`parse-request` (client_task).** The start step. Extracting a PB2002
+   two-letter plate code, the extremum (`furthest` / `closest`), and a top-N
+   count from a free-text request is open-ended natural-language work — not a
+   lookup table and not a yes/no judgment, so neither `execution` nor
+   `decision` fits. A `client_task` lets the agent map plate names
+   (`"Pacific"`, `"Nazca"`, …) to codes using the mapping table carried in
+   the template, pass the data-file paths through unchanged, and fall back to
+   sensible defaults (`PA`, `furthest`, `1`) when the request is terse.
+2. **`compute` (execution).** The whole geospatial pipeline — load three
+   GeoJSON files, filter the target plate, spatially filter earthquakes with
+   `.within()`, project to `EPSG:4087`, filter boundaries involving the plate,
+   combine them with `union_all()`, compute `.distance()` in metres, convert
+   to km, and pick the top-N by `nlargest` / `nsmallest` — is deterministic
+   code over structured inputs. The spec says: when the logic can be written
+   as code over the declared inputs, use `execution`. One script covers it;
+   splitting into load / project / distance scripts would just add I/O without
+   adding clarity.
+3. **`report` (client_task).** The numeric top-N must become a short
+   natural-language answer that mentions the leading earthquake's distance,
+   coordinates, magnitude, and place. That is generation, not computation.
+4. **`end`.** Declares the final-state shape (`summary`, `top_results`,
+   `count_in_plate`, `plate_code`).
 
-No `decision` step: the target plate is a caller-supplied string
-(`plate_name` / `boundary_name_pattern`), not something the skill judges from
-the data. No `client_task`: nothing needs to be generated — the answer is a
-deterministic function of the inputs. No `router`: there is no branching.
+No `router` is needed — the pipeline is linear, and the extremum
+(`furthest` vs `closest`) is handled as a parameter inside `compute` rather
+than as a branch, since the two cases differ by one line of pandas code.
 
-## Line-by-line completeness check against ORIGINAL_SKILL.md
+No `decision` is needed — the only categorical judgment (which plate the user
+means) is one of a large open set of codes, not a small fixed label set, so
+free-text extraction in the client task is the right fit.
 
-Walk of the curated skill; each item is either **carried** (where in this
-skill it lives) or **deliberately dropped** (with rationale). Rules,
-thresholds, lookups, branching, and context needed to apply them are never
-deliberate drops.
+## Line-by-line completeness check — curated → compiled
 
-- Description "Analyze geospatial data using geopandas with proper coordinate
-  projections. Use when calculating distances between geographic features…" →
-  carried into the skill's frontmatter `description` (specialised to
-  earthquakes/plates but preserving the trigger keywords).
-- License MIT → carried as `license: MIT` in frontmatter.
-- "Geographic vs Projected Coordinate Systems" table (EPSG:4326 vs
-  EPSG:4087, degrees vs metres) → the operative rule ("project to a metric
-  CRS before distance") is carried in the `find-furthest` step description
-  and in `anti_patterns`; the script hard-codes `METRIC_CRS = "EPSG:4087"`.
-- "Critical Rule: Never calculate distances directly in geographic
-  coordinates (EPSG:4326). Always project to a metric coordinate system
-  first." → carried into `anti_patterns` and enforced in the script.
-- "Why Projection Matters" incorrect-vs-correct code snippet → the rule it
-  illustrates is carried; the illustrative snippet itself is a deliberate
-  drop (documentation-only; the correct behaviour is executed by the
-  script).
-- "Loading Geospatial Data" — `gpd.read_file(...)` for plates and boundaries
-  → carried in the script (`gpd.read_file(plates_path)` and
-  `gpd.read_file(boundaries_path)`).
-- "From Regular Data with Coordinates" — `Point(lon, lat)` + `GeoDataFrame`
-  with `crs="EPSG:4326"` → carried in the script's earthquake loading
-  (points constructed from `longitude, latitude`, CRS EPSG:4326).
-- "Spatial Filtering — Finding Points Within a Polygon" using `.within()`
-  and `.unary_union` → carried in the script: target plate polygon is built
-  with `.unary_union` and earthquakes are filtered with `.within()`.
-- "Using `.unary_union` for Multiple Geometries" — carried: the script
-  unions the target plate polygon and the filtered boundary segments before
-  distance calculation. Rule is called out in `anti_patterns`.
-- "Distance Calculations — Point to Line/Boundary Distance" four-step
-  recipe (load, project, union, distance/1000) → carried verbatim in the
-  script and echoed in the step description.
-- "Finding Furthest Point" using `.nlargest(1, "distance_km")` → carried
-  literally in the script.
-- "Common Workflow Pattern" full earthquakes-vs-plates example — this is
-  the exact pipeline the skill executes. Every operation (load, build
-  earthquake GeoDataFrame, filter by target plate polygon, project to
-  metric CRS, filter boundary segments by name pattern, union, distance in
-  km, `nlargest`) is carried by the script. The example's use of
-  `Code == "PA"` for polygon selection is replaced by
-  `PlateName == plate_name` because the PB2002 plates layer keys plate
-  identity by `PlateName` (`Pacific`) while the boundaries layer keys by
-  `Name` substrings like `PA`; both are parameterised via state inputs
-  (`plate_name`, `boundary_name_pattern`) so the caller can point at any
-  plate.
-- "Filtering by Attributes" examples (`PlateName`, `Code`, `str.contains`,
-  `PlateA/PlateB` pattern) → the two forms this skill actually uses are
-  carried (`PlateName == plate_name` for the polygon selector,
-  `Name.str.contains(boundary_name_pattern)` for the boundary selector).
-  The other combinations (`Code`, `PlateA`/`PlateB` OR filter) are
-  documentation-only alternatives and are a deliberate drop; agents who
-  need them can consult `ORIGINAL_SKILL.md` under `source/`.
-- "Performance Tips" — filter before projecting, project once, use
-  `.unary_union`, `.copy()` when modifying → carried by the script's
-  ordering (filter → project → union → distance) and by the `.copy()` on
-  the filtered subset. Called out in `anti_patterns`.
-- "Common Pitfalls" table — distance-in-degrees, antimeridian, slow
-  boundary-per-point loops, missing geometries → the first three are
-  carried in `anti_patterns` and enforced by the script. The
-  "missing geometries" row is a deliberate drop: the PB2002 layers used by
-  this task have complete geometries; adding a `gdf.geometry.notna()` guard
-  would be defensive code without a real failure mode against these
-  fixtures.
-- "When NOT to Use Manual Calculations" — no Haversine, no manual
-  point-in-polygon, no per-boundary-point iteration → all three are carried
-  in `anti_patterns`.
-- "Best Practices Summary" 1–9 — every operative rule is carried either in
-  the step description (load, `.within()`, project to EPSG:4087, union,
-  `.distance()`, `.nlargest()`) or in `anti_patterns` (no EPSG:4326
-  distances, no manual Haversine, no per-vertex iteration).
+Walked `source/geospatial-analysis/SKILL.md` end to end. Each distinct piece
+of guidance is either carried in the compiled skill (file + location below) or
+listed as a deliberate drop with rationale.
 
-## Deliberate drops (recap)
+| Source content | Where it lives in the compiled skill |
+|---|---|
+| `description` ("Analyze geospatial data … calculating distances … plate boundaries and earthquake data.") | Narrowed and sharpened in the compiled skill's `description` and `purpose`. |
+| CRS table — EPSG:4326 geographic (degrees) vs EPSG:4087 projected (metres); use the metric CRS for distance | Enforced in `scripts/compute_earthquake_plate_distance.py` via the `METRIC_CRS = "EPSG:4087"` constant and the project-before-distance order of operations. Also stated verbatim in `references/geopandas-cheatsheet.md` so the agent reading the SKILL body sees why it matters. |
+| "Never calculate distances directly in geographic coordinates (EPSG:4326). Always project to a metric coordinate system first." | Same — enforced in the script, restated in the reference. |
+| Why-projection-matters incorrect/correct code example | `references/geopandas-cheatsheet.md`. |
+| Loading GeoJSON with `gpd.read_file` | Script uses `gpd.read_file` for plates, boundaries, and (first-attempt) earthquakes. |
+| Building a `GeoDataFrame` from lat/lon records with `Point(lon, lat)` and `crs="EPSG:4326"` | Script's `load_earthquakes` fallback path, for when `read_file` can't parse the earthquakes file as GeoJSON. |
+| `.within(polygon)` spatial filtering | Script filters earthquakes to the target plate with `gdf_eq[gdf_eq.within(plate_geom)]`. |
+| `.unary_union` for combining multiple geometries | Script uses `union_all()` (the geopandas-1.0 replacement) with a `.unary_union` fallback for older versions. |
+| Filtering boundaries by `str.contains(code)` on `Name`, or by `PlateA == code \| PlateB == code` | Script's `filter_boundaries` tries both schemas (prefers `PlateA`/`PlateB`, falls back to `Name.str.contains`). |
+| Four-step point-to-line distance workflow (load → project → union → distance in metres → ÷1000) | Script implements this in order; `assets/parse_request.md` and `references/geopandas-cheatsheet.md` describe it. |
+| `.nlargest(n, "distance_km")` for furthest, by implication `.nsmallest` for closest | Script branches on `extremum` and uses `nlargest`/`nsmallest` accordingly. |
+| Complete earthquake-near-plate-boundary worked example | Entire compiled pipeline. |
+| Attribute filtering (`Code == "PA"`, `PlateName == "Pacific"`, `str.contains("PA")`) | Script's `filter_plate` tries code columns first, then name columns, case-insensitive substring. |
+| Performance tips — filter before projecting, project once, use `.unary_union`, `.copy()` when modifying | All honoured in the compiled script. Noted in `references/geopandas-cheatsheet.md`. |
+| Pitfalls table — distance-in-degrees, antimeridian, slow iteration, missing geometries | Enforced in the script (metric CRS, `union_all` single call, `gdf.geometry.notna()` filter). Antimeridian is handled implicitly by letting geopandas own the spatial ops. Restated in `references/geopandas-cheatsheet.md`. |
+| "When NOT to use manual calculations" (no Haversine, no manual point-in-polygon, no iterating boundary points) | `anti_patterns` in the YAML body, plus the reference. |
+| Best-practices summary (eight ✅/❌ bullets) | Collectively encoded as behaviour in the script and surfaced to the client via the reference. |
 
-- Incorrect-example code snippets used purely to illustrate rules that are
-  already carried and enforced (the "Why Projection Matters" wrong/right
-  pair).
-- Alternative-attribute examples the compiled pipeline does not use
-  (`Code == "PA"`, `PlateA`/`PlateB` OR filter). The verbatim
-  `ORIGINAL_SKILL.md` remains under `source/` for agents needing those
-  alternates.
-- `gdf[gdf.geometry.notna()]` missing-geometry guard — not needed for the
-  PB2002 fixtures this workflow is built for; no failure mode to guard
-  against here.
+### Deliberate drops
 
-## Task-specific I/O contract
+Nothing operational was dropped. The items below are present in the curated
+source but not re-stated in the compiled body — each is either background
+exposition that the schema has no field for, or redundant with content that is
+already carried.
 
-Confirmed against
-`vendor/skillsbench/tasks/earthquake-plate-calculation/instruction.md` and
-`solution/solution.py`:
-
-- Fixed input paths in-container: `/root/earthquakes_2024.json`,
-  `/root/PB2002_plates.json`, `/root/PB2002_boundaries.json`.
-- Fixed output path: `/root/answer.json`.
-- Answer keys: `id`, `place`, `time` (ISO 8601 `YYYY-MM-DDTHH:MM:SSZ` UTC),
-  `magnitude` (from `props.mag`), `latitude`, `longitude`, `distance_km`
-  rounded to 2 decimal places.
-- Target plate: Pacific → `plate_name="Pacific"`,
-  `boundary_name_pattern="PA"`.
+- **The "Why Projection Matters" prose paragraph.** The *rule* ("project
+  before measuring distance") is enforced in the script and restated in
+  `references/geopandas-cheatsheet.md`. The paragraph of explanation is
+  pedagogical background; the script does not need the agent to understand the
+  derivation, only to follow the pipeline.
+- **The alternative "from regular lat/lon dicts" loading snippet, in the
+  common-workflow section.** The script already contains both code paths
+  (GeoJSON first, lat/lon-dict fallback) and chooses between them at runtime,
+  so the agent never has to replicate the snippet.
+- **The `pacific_plate_alt` / `pa_related` variable-name variants in the
+  "Filtering by Attributes" examples.** Variable names in example code are
+  not instructions; the behaviour (match by code OR by name, boundaries
+  involving a plate = match on `PlateA`/`PlateB` OR `Name` substring) is in
+  the script.
+- **The "Avoid: projecting large dataset just to filter" counter-example.**
+  The positive version ("filter first, then project") is in the script and
+  the reference; the negative framing is explanatory redundancy.

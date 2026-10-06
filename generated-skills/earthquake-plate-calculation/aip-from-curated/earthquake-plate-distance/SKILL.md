@@ -1,108 +1,145 @@
 ---
 name: earthquake-plate-distance
-description: Find the earthquake inside a target tectonic plate that is furthest from that plate's boundaries. Loads USGS earthquake GeoJSON plus PB2002 plate polygons and boundary lines, filters earthquakes by plate polygon, projects to an equidistant metric CRS (EPSG:4087), computes point-to-boundary distances with GeoPandas, and writes the answer JSON (id, place, time, magnitude, latitude, longitude, distance_km). Use when asked to find the most-isolated earthquake within a named plate, when computing earthquake-to-plate-boundary distances, or when doing geospatial point-in-polygon plus distance analysis over plate tectonics data.
+description: Answer earthquake-vs-tectonic-plate distance questions over the PB2002 plate model and a corresponding earthquake GeoJSON/JSON file — find the earthquake inside a named plate that is furthest from (or closest to) that plate's boundary, in kilometres, with correct equidistant-metric-CRS projection. Use when the user asks for the most-interior, deepest-inside, nearest-to-boundary, or furthest-from-boundary earthquake within a specific tectonic plate (Pacific, Nazca, North American, etc.), or any point-to-plate-boundary distance ranking over the PB2002 dataset. Covers plate-code lookup, EPSG:4087 projection, `.within()` membership, boundary filtering, and top-N ranking.
+compatibility: Requires Python 3.10+ with geopandas (>=0.14, works with 1.0.x), shapely, pyproj. GeoJSON files for PB2002 plates and boundaries plus an earthquake file (GeoJSON FeatureCollection or JSON array of records with latitude/longitude) must be reachable on disk.
 license: MIT
-compatibility: Requires Python 3 with geopandas, shapely, and pyproj installed (the task container ships geopandas==1.0.1, shapely==2.0.6, pyproj==3.7.0, pandas==2.2.3, numpy==1.26.4). Input files must be readable GeoJSON at the given paths; the output_path directory must be writable.
 metadata:
-  aip-version: "0.4a0"
+  aip-version: "0.5a1"
+  author: aip-skillbench
+  version: "1.0"
 ---
 
-# AIP runtime — format 0.4a0
+# AIP runtime — format 0.5a1
 
-You are executing an (Agent Instruction Protocol) AIP procedure: the fenced YAML block in this skill's `SKILL.md`. AIP is a protocol for cheaply, quickly, and accurately executing multi-step tasks using a graph-based workflow. AIP is portable, so while designed for execution with an AIP client and server, you, the agent can play both roles instead. 
-
-## Running
-
-If the `aip` command is available (`aip --help` succeeds), use it: run `aip run <this skill's folder> --input <start.json>` with the start step's inputs as JSON. When the run needs you it prints a JSON pause and exits with code 3. `paused` says why: `decision` — answer the listed questions; `review` — confirm or override the flagged answers; `client_task` — do the task and produce the keys in `expects`. Put your answer in a JSON file and run the `resume` command the pause printed. Repeat until the output has `"done": true`; `state` is the result. If `aip` is not available, execute the procedure yourself, following the semantics below.
+You are executing an Agent Instruction Protocol (AIP) procedure: the fenced YAML block in this skill's `SKILL.md`. AIP is a protocol for cheaply, quickly, and accurately executing multi-step tasks as a graph of typed steps. You drive the run and execute every step yourself, following the semantics below.
 
 Critical terminology:
 
-- **Client**: whoever drives the run: posts each step's input, reviews uncertain decisions, performs client tasks, and makes the final call at every step. As a plain Agent Skill, it is the agent that activated the skill.
-- **Server**: runs each step and validates its input against the step's `inputs`. Without one, the activating agent does this itself: runs scripts, answers decision questions by its own judgment, and follows routers.
+- **Client**: you, the agent running this procedure; the `client_task` step kind is named for it. You supply each step's input, run its script, answer its questions by your own judgment, perform its task, follow its router, and make the final call at every step.
 - **State**: the JSON object a step receives. Each step declares its required keys as `inputs`; extra keys pass through.
-- **Step kinds**: `execution` runs a script, `decision` asks typed questions about the state, `client_task` hands work to the client, `router` branches on a value in the state, `end` declares the final state's shape.
+- **Step kinds**: `execution` runs a script, `decision` asks typed questions about the state, `client_task` hands work to you, `router` branches on a value in the state, `end` declares the final state's shape.
 
 ## Execution
 
-The state is one JSON object. It starts as the start step's `inputs` and flows along `inputs_to`; each step's output is merged over it, so keys accumulate and extra keys pass through untouched. A step runs only if the state holds every key it declares in `inputs`, with the declared types. The client may change the state before any step runs; it has the final say at every step.
+The state is one JSON object. It starts as the start step's `inputs` and flows along `inputs_to`; each step's output is merged over it, so keys accumulate and extra keys pass through untouched. A step runs only if the state holds every key it declares in `inputs`, with the declared types; check that before each step. You may change the state before any step runs; you have the final say at every step.
 
-- **`execution`**: run `script` with one JSON object on stdin, `{"currentState": <state>, "assets": {<file stem>: <content>}, "expects": <the next step's inputs>}`. The script writes one JSON object to stdout; it is merged over the state.
-- **`decision`**: answer each question against the state. Each answer collapses to one value under its question name and is merged over the state: a noul to `true`/`false`, a choice to its label, a score to its level number. With a decision model, an answer under its threshold is sent to the client to confirm or override before continuing; without one, the client answers the questions.
-- **`client_task`**: render `template` with `{key}` from the state, `{assets[stem]}` for its assets, and `{meta.name}` for the skill name. The client performs the task, loading `references` if their descriptions apply, and returns the next step's `inputs`; they are merged over the state.
+- **`execution`**: run `script` with one JSON object on stdin, `{"currentState": <state>, "assets": {<file stem>: <content>}, "expects": <the next step's inputs>}`. The script writes one JSON object to stdout; merge it over the state.
+- **`decision`**: answer each question against the state. Each answer collapses to one value under its question name and is merged over the state: a noul to `true`/`false`, a choice to its label, a score to its level number. `thresholds` name the questions where an uncertain answer matters most; when your answer to one is a close call, reconsider it before continuing.
+- **`client_task`**: render `template` with `{key}` from the state, `{assets[stem]}` for its assets, and `{meta.name}` for the skill name. Perform the task, loading `references` if their descriptions apply, and produce the next step's `inputs`; merge them over the state.
 - **`router`**: read the state's `branch_on` key and continue at `branches[value]`. A value with no branch is an error.
 - **`end`**: the state must hold `end`'s `inputs`. That state is the procedure's result.
 
 ```yaml
 purpose: >
-  Given a USGS earthquake GeoJSON, PB2002 plate polygons, and PB2002 boundary
-  lines, find the earthquake inside a target plate that is furthest from that
-  plate's boundaries. A single script loads the data with GeoPandas, filters
-  earthquakes to the target plate polygon in EPSG:4326, projects to the
-  EPSG:4087 equidistant-cylindrical metric CRS, unions the target plate's
-  boundary segments, computes point-to-boundary distances in kilometres,
-  picks the furthest earthquake, converts its Unix-millisecond time to
-  ISO 8601 UTC, and writes the answer JSON.
+  Answer "which earthquake inside plate X is furthest from (or closest to) its
+  boundary" questions over the PB2002 plate model and a corresponding
+  earthquake file. The client extracts the target plate code and the extremum
+  from the user's request; a single geopandas script loads the three GeoJSON/
+  JSON inputs, filters the plate, spatially filters the earthquakes with
+  `.within()`, projects to the equidistant metric CRS EPSG:4087, computes
+  per-earthquake distance to the plate's boundary in kilometres, and returns
+  the top-N; the client writes the natural-language answer.
 
 trigger_when:
-  - Find the earthquake furthest from a named tectonic plate's boundary while inside that plate.
-  - Compute distances from earthquake epicentres to a plate boundary in kilometres using GeoPandas.
-  - Perform point-in-polygon filtering of earthquakes by plate polygon and then rank by boundary distance.
+  - The user asks for the earthquake inside a named tectonic plate that is
+    furthest from, or closest to, that plate's boundary.
+  - The user asks for a top-N ranking of earthquakes by distance to a plate
+    boundary over the PB2002 dataset.
+  - The user's task carries three files along the lines of `PB2002_plates`,
+    `PB2002_boundaries`, and an earthquakes JSON/GeoJSON, and asks a
+    distance-ranking question over them.
 
 do_not_use_when:
-  - The task asks for earthquakes outside any specific plate context, or for distances that are not point-to-line/point-to-polygon.
-  - Only manual Haversine or great-circle math is allowed — this skill relies on GeoPandas projected distances.
-  - The input data is not GeoJSON with a PB2002-style schema (PlateName on plates, Name on boundaries) and cannot be adapted.
+  - The question is about earthquake magnitude, depth, timing, or clustering
+    rather than distance to a plate boundary.
+  - The input data is not the PB2002 plate model or a close analogue (no
+    polygon layer of plates and no line layer of boundaries).
+  - The question is about distances between arbitrary geographic points with
+    no plate involved — a plain geopandas distance call suffices.
 
 steps:
-  - name: find-furthest
-    kind: execution
-    description: >
-      Load earthquakes, plate polygons, and boundary lines; keep only
-      earthquakes inside the target plate polygon (EPSG:4326 point-in-polygon
-      via .within()); project the kept earthquakes and the filtered boundary
-      segments to EPSG:4087; union the boundary segments once with
-      .unary_union; take .distance() to the union and divide by 1000 for km;
-      pick the largest with .nlargest(1, "distance_km"); convert Unix
-      milliseconds to ISO 8601 UTC; write the answer JSON (id, place, time,
-      magnitude, latitude, longitude, distance_km rounded to 2 decimals) to
-      output_path.
+  - name: parse-request
+    kind: client_task
+    description: Extract the PB2002 plate code, extremum, and top-N from the user's natural-language request.
     inputs:
-      - name: earthquakes_path
+      - name: request
         type: string
-        description: Absolute path to the USGS earthquakes GeoJSON FeatureCollection.
+        description: The user's natural-language question, verbatim.
       - name: plates_path
         type: string
-        description: Absolute path to the PB2002 plate polygons GeoJSON (must expose a `PlateName` column).
+        description: Filesystem path to the PB2002 plates GeoJSON (polygons, EPSG:4326).
       - name: boundaries_path
         type: string
-        description: Absolute path to the PB2002 boundary lines GeoJSON (must expose a `Name` column encoding the plate pair, e.g. "PA-NA").
-      - name: output_path
+        description: Filesystem path to the PB2002 boundaries GeoJSON (lines, EPSG:4326).
+      - name: earthquakes_path
         type: string
-        description: Absolute path to write the answer JSON to (e.g. /root/answer.json).
-      - name: plate_name
+        description: Filesystem path to the earthquakes file (GeoJSON FeatureCollection or JSON array of records with latitude/longitude).
+    template: assets/parse_request.md
+    inputs_to: compute
+
+  - name: compute
+    kind: execution
+    description: Load the three files, spatial-filter earthquakes inside the plate, project to EPSG:4087, compute distance to the plate's boundary in km, and return the top-N.
+    inputs:
+      - name: plates_path
         type: string
-        description: Value to match in the plates layer's `PlateName` column (e.g. "Pacific"). Selects the polygon whose interior earthquakes are considered.
-      - name: boundary_name_pattern
+      - name: boundaries_path
         type: string
-        description: Substring to match in the boundaries layer's `Name` column so only that plate's boundary segments are kept (e.g. "PA" for the Pacific plate). Use the plate's PB2002 two-letter code.
-    script: scripts/find_furthest.py
+      - name: earthquakes_path
+        type: string
+      - name: plate_code
+        type: string
+        description: Two-letter PB2002 plate code (e.g. "PA", "NA", "NZ"). The script also accepts a plate name as a case-insensitive substring fallback.
+      - name: extremum
+        type: string
+        description: Either "furthest" or "closest". Anything else is coerced to "furthest".
+      - name: top_n
+        type: integer
+        description: How many earthquakes to return, ranked by `distance_km`.
+    script: scripts/compute_earthquake_plate_distance.py
+    inputs_to: report
+
+  - name: report
+    kind: client_task
+    description: Turn the numeric top-N into a short natural-language answer to the user's original request.
+    inputs:
+      - name: request
+        type: string
+      - name: plate_code
+        type: string
+      - name: extremum
+        type: string
+      - name: top_n
+        type: integer
+      - name: count_in_plate
+        type: integer
+        description: Number of earthquakes that fell inside the plate polygon via `.within()`.
+      - name: top_results
+        type: list[*]
+        description: Ranked list of earthquake records with `distance_km`, `latitude`, `longitude`, and whatever identifying fields the input carried (e.g. id, place, magnitude, time).
+    template: assets/report.md
+    references:
+      - path: references/geopandas-cheatsheet.md
+        description: Load if the pipeline output looks surprising (unexpectedly empty `top_results`, missing identifier fields, a plate-code lookup error) and you need to explain or decide whether to retry with different parameters.
     inputs_to: end
 
   - name: end
     kind: end
-    description: The path the answer JSON was written to, plus the answer object itself.
+    description: The user-facing answer, the ranked top-N records, and the counts that back them.
     inputs:
-      - name: output_path
+      - name: summary
         type: string
-      - name: result
-        type: object
+      - name: top_results
+        type: list[*]
+      - name: count_in_plate
+        type: integer
+      - name: plate_code
+        type: string
 
 anti_patterns:
-  - Computing distances directly in EPSG:4326 — degrees are not metres and vary with latitude; always project to a metric CRS such as EPSG:4087 first.
-  - Implementing a manual Haversine loop over boundary vertices instead of a single GeoPandas `.distance()` against a unioned boundary geometry.
-  - Iterating point-in-polygon checks by hand instead of using `.within()` on the plate polygon.
-  - Projecting the full global dataset before filtering — filter first (attribute or spatial), then project the small subset.
-  - Skipping `.unary_union` and calling `.distance()` against every boundary segment separately.
-  - Manual ±360° longitude adjustments for antimeridian crossings — GeoPandas spatial operations handle it.
-  - Rounding the distance before ranking, or picking the answer before rounding to 2 decimals only for the output.
+  - Calculating distance directly in EPSG:4326 — degrees are not metres, and the ranking will be wrong at any latitude far from the equator. Always project to EPSG:4087 (or another equidistant metric CRS) first.
+  - Hand-rolling a Haversine formula or iterating over boundary vertices instead of calling `.distance()` on a `union_all()` geometry.
+  - Checking plate membership by comparing lat/lon ranges instead of `.within()` on the plate polygon.
+  - Projecting the entire earthquake catalogue before filtering it down to the plate — filter first, project second.
+  - Fabricating earthquake identifiers in the final summary when the input records do not carry them.
 ```
