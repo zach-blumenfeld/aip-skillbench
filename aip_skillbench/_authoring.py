@@ -31,7 +31,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from aip_skillbench._aip import AIP_DIR, ROOT, read_aip_ref
+from aip_skillbench._aip import AIP_SRC_DIR, ROOT, read_aip_ref
 
 AUTHORING_BUILD = ROOT / "build" / "authoring"
 
@@ -59,7 +59,7 @@ def make_workspace(task: str, from_: str) -> Path:
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     ws = AUTHORING_BUILD / f"{task}-{from_}-{stamp}"
     ws.mkdir(parents=True)
-    shutil.copytree(AIP_DIR, ws / ".claude" / "skills" / "aip", ignore=_AIP_SKILL_IGNORE, symlinks=True)
+    shutil.copytree(AIP_SRC_DIR, ws / ".claude" / "skills" / "aip", ignore=_AIP_SKILL_IGNORE, symlinks=True)
     (ws / "inputs").mkdir()
     (ws / "out").mkdir()
     return ws

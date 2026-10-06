@@ -16,15 +16,21 @@ import typer
 from aip_skillbench._aip import (
     AIP_BUILD_DIR,
     AIP_DEFAULT_REF,
-    AIP_DIR,
     AIP_REF_FILE,
     AIP_REMOTE,
+    AIP_SPEC_DEFAULT_REF,
+    AIP_SPEC_DIR,
+    AIP_SPEC_REMOTE,
+    AIP_SRC_DIR,
     GENERATED_SKILLS,
+    HOST_SKILLS_DIR,
     NUDGE_ENV,
     ROOT,
     WHEEL_ENV,
+    aip_spec_wheel,
     aip_wheel,
     format_version,
+    runtime_skill_dir,
     validate_packs,
 )
 
@@ -64,11 +70,12 @@ def _generated_skills_dir(task: str, from_: ConvertFrom) -> Path:
 
 
 def _require_aip() -> Path:
-    if not (AIP_DIR / "SKILL.md").exists():
+    skill = HOST_SKILLS_DIR / "aip"
+    if not (skill / "SKILL.md").exists():
         raise typer.BadParameter(
-            f"AIP not installed at {AIP_DIR}. Run `aip-skillbench bootstrap` first."
+            f"AIP authoring skill not found at {skill}. Run `aip-skillbench bootstrap` first."
         )
-    return AIP_DIR
+    return skill
 
 
 def _require_skill_creator() -> Path:
@@ -114,77 +121,88 @@ def _author_api_key() -> tuple[str | None, str]:
     key = _read_dotenv(ROOT / ".env").get("ANTHROPIC_API_KEY")
     return key, (".env" if key else "inherited env")
 
+def _run(cmd: list[str], cwd: Path | None = None) -> None:
+    typer.echo("$ " + " ".join(cmd))
+    rc = subprocess.call(cmd, cwd=cwd)
+    if rc != 0:
+        raise typer.Exit(rc)
+
+
+def _clone(remote: str, ref: str, dest: Path, sha: str | None) -> str:
+    """Clone `remote` at `ref` into `dest` (optionally detach at `sha`); return HEAD."""
+    if sha:
+        # A SHA cannot be cloned shallowly by name; take the ref, then fetch the commit.
+        _run(["git", "clone", "--branch", ref, remote, str(dest)])
+        _run(["git", "fetch", "origin", sha], cwd=dest)
+        _run(["git", "checkout", "--detach", sha], cwd=dest)
+    else:
+        _run(["git", "clone", "--depth", "1", "--branch", ref, remote, str(dest)])
+    return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=dest, text=True).strip()
+
+
 @app.command()
 def bootstrap(
     aip_ref: str = typer.Option(
-        AIP_DEFAULT_REF, help="AIP branch or tag to clone (default: main; pin a release with e.g. v0.4a0)."
+        AIP_DEFAULT_REF, help="aip (runtime, client, server) branch or tag to clone."
     ),
     aip_sha: Optional[str] = typer.Option(
-        None, "--aip-sha", help="Commit to check out after cloning, for an exact reproduction."
+        None, "--aip-sha", help="aip commit to check out after cloning, for an exact reproduction."
     ),
-    force: bool = typer.Option(False, help="Re-clone if AIP already present."),
-    install_cli: bool = typer.Option(
-        True, "--install-cli/--no-install-cli",
-        help="Install the `aip` CLI on the host (uv tool) and build the wheel trial containers get.",
+    aip_spec_ref: str = typer.Option(
+        AIP_SPEC_DEFAULT_REF, help="aip-spec (format, validator, authoring skill) branch or tag."
     ),
+    force: bool = typer.Option(False, help="Re-clone if the clones are already present."),
 ) -> None:
-    """One-time setup: clone AIP into ./.claude/skills/aip (gitignored), install the
-    host `aip` CLI, build the wheel for trial containers, and record the exact ref.
+    """One-time setup: clone aip and aip-spec into ./.claude/skills-src/ (gitignored),
+    install both CLIs on the host, build both wheels for trial containers, write the
+    authoring and runtime skills under build/, and record the pins.
 
-    The 0.4a0 authoring checklist runs `aip validate` and functional-tests skills
-    with `aip run`, so the CLI has to be on the host PATH for `convert`. Trial
-    containers get the wheel from build/aip/ (see _benchflow_patch).
+    Authoring validates with `aip-spec validate` and functional-tests with `aip run`,
+    so both CLIs have to be on the host PATH for `convert`. Trial containers get the
+    wheels from build/aip/ (see _benchflow_patch).
     """
-    if AIP_DIR.exists():
+    clones = (AIP_SRC_DIR, AIP_SPEC_DIR)
+    if any(d.exists() for d in clones):
         if not force:
-            typer.echo(f"AIP already at {AIP_DIR} (pass --force to re-clone).")
+            typer.echo(f"AIP clones already under {AIP_SRC_DIR.parent} (pass --force to re-clone).")
             raise typer.Exit(0)
-        shutil.rmtree(AIP_DIR)
+        for d in clones:
+            if d.exists():
+                shutil.rmtree(d)
+    AIP_SRC_DIR.parent.mkdir(parents=True, exist_ok=True)
 
-    AIP_DIR.parent.mkdir(parents=True, exist_ok=True)
-    cmd = ["git", "clone", "--depth", "1", "--branch", aip_ref, AIP_REMOTE, str(AIP_DIR)]
-    if aip_sha:
-        # A SHA cannot be cloned shallowly by name; take the branch, then fetch the commit.
-        cmd = ["git", "clone", "--branch", aip_ref, AIP_REMOTE, str(AIP_DIR)]
-    typer.echo("$ " + " ".join(cmd))
-    rc = subprocess.call(cmd)
-    if rc != 0:
-        raise typer.Exit(rc)
-    if aip_sha:
-        for step in (["git", "fetch", "origin", aip_sha], ["git", "checkout", "--detach", aip_sha]):
-            typer.echo("$ " + " ".join(step))
-            rc = subprocess.call(step, cwd=AIP_DIR)
-            if rc != 0:
-                raise typer.Exit(rc)
-    sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=AIP_DIR, text=True).strip()
+    aip_head = _clone(AIP_REMOTE, aip_ref, AIP_SRC_DIR, aip_sha)
+    spec_head = _clone(AIP_SPEC_REMOTE, aip_spec_ref, AIP_SPEC_DIR, None)
+
+    # Host CLIs: `aip-spec validate` for the gate, `aip run` for authoring's functional test.
+    _run(["uv", "tool", "install", "--force", "--editable", str(AIP_SPEC_DIR)])
+    _run(["uv", "tool", "install", "--force", "--editable", f"{AIP_SRC_DIR}[server]"])
+
+    # Wheels for trial containers.
+    if AIP_BUILD_DIR.exists():
+        shutil.rmtree(AIP_BUILD_DIR)
+    AIP_BUILD_DIR.mkdir(parents=True)
+    for src in (AIP_SPEC_DIR, AIP_SRC_DIR):
+        _run(["uv", "build", "--wheel", "--out-dir", str(AIP_BUILD_DIR), str(src)])
+    typer.echo(f"Built {aip_spec_wheel().name} and {aip_wheel().name} in {AIP_BUILD_DIR}")
+
+    # Skills: aip/ (authoring, copied into authoring workspaces) and aip-runtime/
+    # (protocol directions); plus a skills dir holding only aip-runtime for trials.
+    for d in (HOST_SKILLS_DIR, runtime_skill_dir()):
+        if d.exists():
+            shutil.rmtree(d)
+    _run(["aip", "skill", "install", "--path", str(HOST_SKILLS_DIR)])
+    _run(["aip", "runtime", "--skill", "--out", str(runtime_skill_dir())])
+
     version = format_version()
-    typer.echo(f"Installed AIP at {AIP_DIR}  ref={aip_ref}  sha={sha[:12]}  format={version}")
-
-    if install_cli:
-        # Host CLI: `aip validate` / `aip run` for authoring and pack validation.
-        cmd = ["uv", "tool", "install", "--force", "--editable", str(AIP_DIR)]
-        typer.echo("$ " + " ".join(cmd))
-        rc = subprocess.call(cmd)
-        if rc != 0:
-            raise typer.Exit(rc)
-        # Wheel for trial containers.
-        if AIP_BUILD_DIR.exists():
-            shutil.rmtree(AIP_BUILD_DIR)
-        AIP_BUILD_DIR.mkdir(parents=True)
-        cmd = ["uv", "build", "--wheel", "--out-dir", str(AIP_BUILD_DIR), str(AIP_DIR)]
-        typer.echo("$ " + " ".join(cmd))
-        rc = subprocess.call(cmd)
-        if rc != 0:
-            raise typer.Exit(rc)
-        typer.echo(f"Built {aip_wheel().name} in {AIP_BUILD_DIR}")
+    typer.echo(f"aip {aip_ref}@{aip_head[:12]}  aip-spec {aip_spec_ref}@{spec_head[:12]}  format={version}")
 
     GENERATED_SKILLS.mkdir(exist_ok=True)
     AIP_REF_FILE.write_text(
         json.dumps(
             {
-                "remote": AIP_REMOTE,
-                "ref": aip_ref,
-                "sha": sha,
+                "aip": {"remote": AIP_REMOTE, "ref": aip_ref, "sha": aip_head},
+                "aip_spec": {"remote": AIP_SPEC_REMOTE, "ref": aip_spec_ref, "sha": spec_head},
                 "aip_version": version,
                 "recorded_at": datetime.now().isoformat(timespec="seconds"),
             },

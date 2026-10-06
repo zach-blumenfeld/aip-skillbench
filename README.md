@@ -45,11 +45,13 @@ aip-skillbench/
 ├── generated-skills/              # AIP authoring outputs for modes 4 & 5 (committed)
 ├── jobs/                          # bench run outputs (gitignored)
 ├── vendor/skillsbench/            # submodule of benchflow-ai/skillsbench (read-only)
-├── build/aip/                     # aip wheel built by `bootstrap`, installed into trial containers (gitignored)
-└── .claude/skills/aip/            # cloned by `bootstrap` (gitignored)
+├── build/aip/                     # aip + aip-spec wheels built by `bootstrap`, installed into trial containers (gitignored)
+├── build/skills/                  # `aip skill install` output: aip/ (authoring) and aip-runtime/ (gitignored)
+├── build/aip-runtime-skill/       # only aip-runtime/SKILL.md, mounted in aip-runtime trials (gitignored)
+└── .claude/skills-src/            # aip and aip-spec clones made by `bootstrap` (gitignored)
 ```
 
-`generated-skills/AIP_REF.json` records the AIP remote, ref, commit, and format version the cohort was authored against; `bootstrap` writes it and it is committed with the cohort.
+`generated-skills/AIP_REF.json` records the remote, ref, and commit of both `aip` and `aip-spec`, and the format version, the cohort was authored against; `bootstrap` writes it and it is committed with the cohort.
 
 `vendor/` and `.claude/` are read-only — never write into them. Mode 4 & 5 conversion artifacts go to `generated-skills/<task>/aip-from-{instruction,curated}/<skill>/`.
 
@@ -59,16 +61,19 @@ aip-skillbench/
 git clone --recurse-submodules git@github.com:zach-blumenfeld/aip-skillbench.git
 cd aip-skillbench
 uv sync
-aip-skillbench bootstrap            # clones AIP main (format 0.4a0) into ./.claude/skills/aip,
-                                    # installs the host `aip` CLI, builds build/aip/*.whl,
-                                    # writes generated-skills/AIP_REF.json
+aip-skillbench bootstrap            # clones aip (aip-0.5a0) and aip-spec (v0.5a1, format 0.5a1)
+                                    # into ./.claude/skills-src/, installs the host `aip` and
+                                    # `aip-spec` CLIs, builds build/aip/*.whl, writes
+                                    # build/skills/ and build/aip-runtime-skill/, and
+                                    # records both pins in generated-skills/AIP_REF.json
 cp .env.example .env                # fill in ANTHROPIC_API_KEY
 aip-skillbench --help
 ```
 
-To update AIP later: `aip-skillbench bootstrap --force [--aip-ref <branch|tag>] [--aip-sha <commit>]`,
-e.g. `--aip-ref v0.4a0` to pin a release.
-`--aip-sha` reproduces an exact cohort from `generated-skills/AIP_REF.json` after the branch has moved.
+To update AIP later: `aip-skillbench bootstrap --force [--aip-ref <branch|tag>] [--aip-sha <commit>] [--aip-spec-ref <tag>]`.
+`aip-0.5a0` is a branch, so `--aip-sha <aip.sha from generated-skills/AIP_REF.json>` reproduces
+an exact cohort after it has moved. Pack validation (`aip-spec validate`) treats the
+`runtime_block_outdated` warning as a failure, so no campaign mixes runtime-block versions.
 
 ### AIP 0.4a0 and the protocol client
 

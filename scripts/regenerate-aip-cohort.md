@@ -5,7 +5,8 @@ Parallelizes mode-4 and mode-5 authoring across all 16 tasks currently under `ge
 ## Fill these in
 
 ```bash
-AIP_REF=v0.4a0                            # the AIP tag to author against (default for bootstrap is main)
+AIP_REF=aip-0.5a0                         # aip (runtime/client/server) branch; bootstrap's default
+AIP_SPEC_REF=v0.5a1                       # aip-spec (format, validator, authoring skill) tag; bootstrap's default
 CONCURRENCY=4                             # parallel claude -p calls; raise for speed, lower if hitting rate limits
 ```
 
@@ -19,21 +20,25 @@ git tag -a aip-spec-vX.Y -m "AIP spec vX.Y cohort" && git push --tags
 
 (Skip if already done — `aip-spec-v0.2` was tagged in commit `b8a5e32`.)
 
-## 2. Update the AIP skill clone to the new spec
+## 2. Update the aip and aip-spec clones
 
 ```bash
-uv run aip-skillbench bootstrap --aip-ref "$AIP_REF" --force
-cat generated-skills/AIP_REF.json     # remote, ref, sha, aip_version — commit this with the cohort
+uv run aip-skillbench bootstrap --aip-ref "$AIP_REF" --aip-spec-ref "$AIP_SPEC_REF" --force
+cat generated-skills/AIP_REF.json     # aip {remote, ref, sha}, aip_spec {remote, ref, sha}, aip_version — commit with the cohort
 ```
 
-This also installs the host `aip` CLI (the 0.4a0 authoring checklist runs `aip validate` and
-`aip run`) and builds `build/aip/*.whl`, which `eval` installs into every AIP-mode trial
-container. To pin an exact commit later, pass `--aip-sha <sha from AIP_REF.json>`.
+This clones both repos into `.claude/skills-src/`, installs the host `aip` and `aip-spec`
+CLIs (authoring validates with `aip-spec validate` and functional-tests with `aip run`),
+builds both wheels into `build/aip/` for trial containers, and writes the authoring skill
+(`build/skills/aip/`) and the runtime skill (`build/aip-runtime-skill/aip-runtime/`).
+`aip-0.5a0` is a branch: to reproduce an exact cohort later, pass
+`--aip-sha <aip.sha from AIP_REF.json>`.
 
-Verify the branch/tag actually exists in the remote first if you're not sure:
+Verify the refs actually exist in the remotes first if you're not sure:
 
 ```bash
 git ls-remote git@github.com:zach-blumenfeld/aip.git "$AIP_REF"
+git ls-remote git@github.com:zach-blumenfeld/aip-spec.git "$AIP_SPEC_REF"
 ```
 
 ## 3. Regenerate all 16 task packs in parallel
@@ -81,13 +86,15 @@ for t in 3d-scan-calc debug-trl-grpo earthquake-phase-association fix-druid-loop
 done
 ```
 
-Every pack must validate against the bootstrapped format (`convert` already gates on
-this; `eval` and `run-matrix` refuse invalid packs):
+Every pack must validate against the bootstrapped format with no `runtime_block_outdated`
+warning (`convert` already gates on this; `eval` and `run-matrix` refuse such packs):
 
 ```bash
-for d in generated-skills/*/aip-from-*/*/; do aip validate "$d" >/dev/null 2>&1 || echo "INVALID: $d"; done
+for d in generated-skills/*/aip-from-*/*/; do
+  out=$(aip-spec validate "$d" 2>&1); { [ $? -ne 0 ] || grep -q runtime_block_outdated <<<"$out"; } && echo "INVALID: $d"
+done
 head -6 generated-skills/3d-scan-calc/aip-from-instruction/*/SKILL.md
-# Expect: metadata.aip-version: "0.4a0"
+# Expect: metadata.aip-version: "0.5a1"
 ```
 
 Curated-side packs can be authored one-per-curated-skill (default, names preserved) or
@@ -98,7 +105,7 @@ record it in the cohort commit message.
 
 ```bash
 git add generated-skills/          # includes generated-skills/AIP_REF.json
-git commit -m "Regenerate AIP cohort against spec $AIP_REF ($(python3 -c 'import json;print(json.load(open("generated-skills/AIP_REF.json"))["sha"][:12])'))"
+git commit -m "Regenerate AIP cohort against spec $AIP_REF ($(python3 -c 'import json;print(json.load(open("generated-skills/AIP_REF.json"))["aip"]["sha"][:12])'))"
 git tag -a aip-spec-$AIP_REF -m "AIP spec $AIP_REF cohort"
 git push && git push --tags
 ```
