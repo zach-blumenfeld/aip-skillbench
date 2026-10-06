@@ -1,12 +1,10 @@
 ---
 name: earthquake-plate-distance
-description: Answer earthquake-vs-tectonic-plate distance questions over the PB2002 plate model and a corresponding earthquake GeoJSON/JSON file — find the earthquake inside a named plate that is furthest from (or closest to) that plate's boundary, in kilometres, with correct equidistant-metric-CRS projection. Use when the user asks for the most-interior, deepest-inside, nearest-to-boundary, or furthest-from-boundary earthquake within a specific tectonic plate (Pacific, Nazca, North American, etc.), or any point-to-plate-boundary distance ranking over the PB2002 dataset. Covers plate-code lookup, EPSG:4087 projection, `.within()` membership, boundary filtering, and top-N ranking.
-compatibility: Requires Python 3.10+ with geopandas (>=0.14, works with 1.0.x), shapely, pyproj. GeoJSON files for PB2002 plates and boundaries plus an earthquake file (GeoJSON FeatureCollection or JSON array of records with latitude/longitude) must be reachable on disk.
+description: Compute distances between earthquakes (USGS GeoJSON) and PB2002 tectonic plate boundaries using geopandas with a metric projection — e.g. "which earthquake inside the Pacific plate is furthest from any Pacific plate boundary". Use when a request mentions earthquakes with plates/boundaries, "nearest/furthest earthquake to a plate boundary", or asks for a distance in km between seismic events and plate edges.
 license: MIT
+compatibility: Requires Python with geopandas>=1.0, shapely>=2.0, pyproj>=3.7 available where scripts run (the task's container ships these; locally, bootstrap a venv — see source/README.md).
 metadata:
   aip-version: "0.5a1"
-  author: aip-skillbench
-  version: "1.0"
 ---
 
 # AIP runtime — format 0.5a1
@@ -31,115 +29,133 @@ The state is one JSON object. It starts as the start step's `inputs` and flows a
 
 ```yaml
 purpose: >
-  Answer "which earthquake inside plate X is furthest from (or closest to) its
-  boundary" questions over the PB2002 plate model and a corresponding
-  earthquake file. The client extracts the target plate code and the extremum
-  from the user's request; a single geopandas script loads the three GeoJSON/
-  JSON inputs, filters the plate, spatially filters the earthquakes with
-  `.within()`, projects to the equidistant metric CRS EPSG:4087, computes
-  per-earthquake distance to the plate's boundary in kilometres, and returns
-  the top-N; the client writes the natural-language answer.
+  Answer "earthquake vs. plate boundary" questions over USGS earthquake
+  GeoJSON and the PB2002 plates/boundaries dataset. Parse the user's
+  request into a target plate, metric, and boundary scope; run a single
+  geopandas computation that projects to a metric CRS (EPSG:4087),
+  filters earthquakes to the plate, unions the relevant boundaries, and
+  measures distances in kilometers; return the headline number (and the
+  specific earthquake, when the metric picks one).
 
 trigger_when:
-  - The user asks for the earthquake inside a named tectonic plate that is
-    furthest from, or closest to, that plate's boundary.
-  - The user asks for a top-N ranking of earthquakes by distance to a plate
-    boundary over the PB2002 dataset.
-  - The user's task carries three files along the lines of `PB2002_plates`,
-    `PB2002_boundaries`, and an earthquakes JSON/GeoJSON, and asks a
-    distance-ranking question over them.
+  - A user asks for the earthquake inside a named plate that is
+    furthest from, nearest to, or at some aggregate distance from the
+    plate's boundaries.
+  - A task provides USGS-format earthquake GeoJSON and PB2002
+    plates/boundaries GeoJSON and asks a distance question over them.
+  - A request names tectonic plates (Pacific, Nazca, North America, …)
+    and seismic events together and asks for a km-distance answer.
 
 do_not_use_when:
-  - The question is about earthquake magnitude, depth, timing, or clustering
-    rather than distance to a plate boundary.
-  - The input data is not the PB2002 plate model or a close analogue (no
-    polygon layer of plates and no line layer of boundaries).
-  - The question is about distances between arbitrary geographic points with
-    no plate involved — a plain geopandas distance call suffices.
+  - The question is about earthquake magnitude, depth, timing, or
+    frequency alone — no plate-boundary distance is needed.
+  - The input data is not GeoJSON / not the PB2002 schema and would
+    need its own loader (adapt the script in that case, do not force
+    the inputs through this skill).
+  - The user wants a map or visualization rather than a numeric answer.
 
 steps:
   - name: parse-request
     kind: client_task
-    description: Extract the PB2002 plate code, extremum, and top-N from the user's natural-language request.
+    description: >
+      Extract plate_code (two-letter PB2002), metric (furthest / nearest /
+      mean / median), and boundary_scope (plate / all) from the user's
+      free-form request. Keep user_request and the three file paths on
+      the state so downstream steps can use them.
     inputs:
-      - name: request
+      - name: user_request
         type: string
-        description: The user's natural-language question, verbatim.
-      - name: plates_path
-        type: string
-        description: Filesystem path to the PB2002 plates GeoJSON (polygons, EPSG:4326).
-      - name: boundaries_path
-        type: string
-        description: Filesystem path to the PB2002 boundaries GeoJSON (lines, EPSG:4326).
+        description: The user's question verbatim.
       - name: earthquakes_path
         type: string
-        description: Filesystem path to the earthquakes file (GeoJSON FeatureCollection or JSON array of records with latitude/longitude).
+        description: Absolute path to the earthquakes GeoJSON (USGS FeatureCollection).
+      - name: plates_path
+        type: string
+        description: Absolute path to the PB2002 plates GeoJSON.
+      - name: boundaries_path
+        type: string
+        description: Absolute path to the PB2002 boundaries GeoJSON.
     template: assets/parse_request.md
+    references:
+      - path: references/pb2002-plate-codes.md
+        description: Look up a plate's two-letter Code from its name (Pacific→PA, Nazca→NZ, …); also explains why boundary filtering uses PlateA/PlateB, not substring match on Name.
     inputs_to: compute
 
   - name: compute
     kind: execution
-    description: Load the three files, spatial-filter earthquakes inside the plate, project to EPSG:4087, compute distance to the plate's boundary in km, and return the top-N.
+    description: >
+      Load the three GeoJSON files, filter earthquakes to those inside
+      the target plate polygon (.within), project both earthquakes and
+      the plate's boundary segments to EPSG:4087, union the boundaries
+      into one geometry, and compute per-earthquake distances in km.
+      Return the requested metric (and the picked earthquake for
+      furthest/nearest).
     inputs:
+      - name: user_request
+        type: string
+      - name: earthquakes_path
+        type: string
       - name: plates_path
         type: string
       - name: boundaries_path
         type: string
-      - name: earthquakes_path
-        type: string
       - name: plate_code
         type: string
-        description: Two-letter PB2002 plate code (e.g. "PA", "NA", "NZ"). The script also accepts a plate name as a case-insensitive substring fallback.
-      - name: extremum
+      - name: metric
         type: string
-        description: Either "furthest" or "closest". Anything else is coerced to "furthest".
-      - name: top_n
-        type: integer
-        description: How many earthquakes to return, ranked by `distance_km`.
-    script: scripts/compute_earthquake_plate_distance.py
+      - name: boundary_scope
+        type: string
+    script: scripts/compute_distance.py
     inputs_to: report
 
   - name: report
     kind: client_task
-    description: Turn the numeric top-N into a short natural-language answer to the user's original request.
+    description: >
+      Turn the computed result into a short answer to the user's original
+      question. Lead with the distance in km rounded to two decimals; if
+      the metric picked an earthquake, name it by USGS id, magnitude,
+      and place. Load references/geopandas-cheatsheet.md if the number
+      looks wrong before writing the answer.
     inputs:
-      - name: request
+      - name: user_request
         type: string
+      - name: summary
+        type: string
+      - name: distance_km
+        type: float
       - name: plate_code
         type: string
-      - name: extremum
+      - name: plate_name
         type: string
-      - name: top_n
+      - name: metric
+        type: string
+      - name: n_earthquakes_in_plate
         type: integer
-      - name: count_in_plate
-        type: integer
-        description: Number of earthquakes that fell inside the plate polygon via `.within()`.
-      - name: top_results
-        type: list[*]
-        description: Ranked list of earthquake records with `distance_km`, `latitude`, `longitude`, and whatever identifying fields the input carried (e.g. id, place, magnitude, time).
+      - name: earthquake
+        type: object
     template: assets/report.md
     references:
       - path: references/geopandas-cheatsheet.md
-        description: Load if the pipeline output looks surprising (unexpectedly empty `top_results`, missing identifier fields, a plate-code lookup error) and you need to explain or decide whether to retry with different parameters.
+        description: Load if the distance number seems off (e.g. absurdly small when it should be hundreds of km) — the common silent failure is a missed EPSG:4087 projection or substring-matched boundaries.
     inputs_to: end
 
   - name: end
     kind: end
-    description: The user-facing answer, the ranked top-N records, and the counts that back them.
+    description: Final answer plus the structured result that produced it.
     inputs:
-      - name: summary
+      - name: answer
         type: string
-      - name: top_results
-        type: list[*]
-      - name: count_in_plate
-        type: integer
+      - name: distance_km
+        type: float
       - name: plate_code
+        type: string
+      - name: metric
         type: string
 
 anti_patterns:
-  - Calculating distance directly in EPSG:4326 — degrees are not metres, and the ranking will be wrong at any latitude far from the equator. Always project to EPSG:4087 (or another equidistant metric CRS) first.
-  - Hand-rolling a Haversine formula or iterating over boundary vertices instead of calling `.distance()` on a `union_all()` geometry.
-  - Checking plate membership by comparing lat/lon ranges instead of `.within()` on the plate polygon.
-  - Projecting the entire earthquake catalogue before filtering it down to the plate — filter first, project second.
-  - Fabricating earthquake identifiers in the final summary when the input records do not carry them.
+  - Computing .distance() in EPSG:4326 and reporting the degree value as km.
+  - Filtering boundaries by substring on the Name property instead of PlateA/PlateB (matches wrong neighbors).
+  - Looping distance per boundary segment instead of unary_union + one .distance() call.
+  - Re-implementing haversine or point-in-polygon logic instead of using geopandas.
+  - Hardcoding `/root/earthquakes_2024.json` in the script; the path must come from the state so the pack runs on any file given.
 ```

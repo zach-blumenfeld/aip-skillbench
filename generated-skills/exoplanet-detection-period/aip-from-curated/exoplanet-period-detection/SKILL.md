@@ -1,9 +1,10 @@
 ---
 name: exoplanet-period-detection
-description: Detect the orbital period of a transiting exoplanet from a photometric light curve. Load a TESS-style ASCII light curve (time, flux, quality flag, flux error), apply quality cuts, sigma-clip and flatten with a Savitzky-Golay window chosen from the cadence, run a broad Transit Least Squares (TLS) search, classify the candidate strength from SDE/SNR, and refine the period in a narrow TLS pass. Use when the input is a single-target light curve file and the goal is a period measurement with uncertainty and detection-strength metrics (SDE, SNR, depth, duration, T0).
-compatibility: Scripts require numpy, scipy, astropy, lightkurve, and transitleastsquares in the executing Python. See source Dockerfile for a known-good set (python 3.12, numpy 1.26, astropy 6.0, lightkurve 2.4, transitleastsquares 1.32).
+description: Detect a transiting exoplanet's orbital period from a plain-text TESS light curve. Loads a time/flux/flag/flux_err file, applies quality flags, sigma-clips outliers, flattens stellar/instrumental trends while preserving transit depth, runs a broad Transit Least Squares (TLS) search, then refines the best candidate in a narrow period window for a precise period. Use when the input is one single-target light curve and the goal is to report the orbital period (and transit depth, T0, duration, SDE, SNR). Keywords - TESS, Kepler, K2, light curve, transit, exoplanet, period search, TLS, transitleastsquares, Lomb-Scargle, BLS, phase fold.
+compatibility: Needs Python 3.10+ with numpy, scipy, and the transitleastsquares package. The curated task container already provides these (see source/README.md).
 metadata:
   aip-version: "0.5a1"
+  source-skills: "exoplanet-workflows, light-curve-preprocessing, lomb-scargle-periodogram, box-least-squares, transit-least-squares"
 ---
 
 # AIP runtime — format 0.5a1
@@ -28,144 +29,105 @@ The state is one JSON object. It starts as the start step's `inputs` and flows a
 
 ```yaml
 purpose: >
-  Measure the orbital period of a transiting exoplanet in a single-target
-  photometric light curve. The pipeline is: load the ASCII light curve and
-  apply quality-flag + finite-value cuts, sigma-clip and Savitzky-Golay
-  flatten the result, run a broad TLS period search over a cadence- and
-  baseline-aware window, classify the detection strength from SDE and SNR,
-  and (for anything stronger than a weak detection) refine the period with
-  a dense TLS pass in a +/-5% window around the candidate.
+  Compute the orbital period of a transiting exoplanet from a single TESS-style
+  plain-text light curve. The pipeline preprocesses the data (quality flags,
+  outlier clipping, Savitzky-Golay flattening), runs a broad Transit Least
+  Squares (TLS) period search, classifies the candidate's signal strength from
+  its SDE, and - when the candidate is strong - refines the period with a
+  narrow TLS re-search for a tight final uncertainty. TLS is chosen over
+  Lomb-Scargle (not transit-shaped) and BLS (less sensitive, simpler box
+  model); see source/README.md for the full method comparison.
 
 trigger_when:
-  - A user hands you a single-target light-curve file and asks for the orbital period of a transiting exoplanet.
-  - You need the period, T0, depth, duration, SDE, and SNR of the dominant transit signal in a photometric time series.
-  - Downstream work (phase-folding, transit masking, model fitting) needs a precise period from a broad period search.
+  - The task hands you a single light-curve file (TESS, Kepler, K2, or any
+    plain-text time/flux/flag/flux_err series) and asks for an orbital period.
+  - You need to detect a transit, measure its depth, or phase-fold at the
+    recovered period for one target.
 
 do_not_use_when:
-  - The signal of interest is not transit-shaped (stellar rotation, pulsation, radial-velocity sinusoid). Use Lomb-Scargle instead; see `references/method-selection.md`.
-  - The file has no flux-uncertainty column and you have no way to synthesise one. TLS requires `flux_err`.
-  - The task is multi-planet discovery requiring iterative transit masking. This skill reports the single dominant period; mask with `transitleastsquares.transit_mask` and re-run for the next planet.
-  - The input is multiple light curves to be stacked or compared. Run this skill once per curve.
+  - The data is radial-velocity, imaging, or any non-photometric time series.
+  - The target shows obvious eclipsing-binary variability (deep V-shaped dips,
+    secondary eclipses) rather than planet-shaped transits - use a dedicated
+    EB analysis instead.
+  - You already know the planet period precisely and only need characterization
+    (transit modeling with batman, limb darkening, stellar parameters).
+  - The task is multi-planet discovery requiring iterative masking of multiple
+    candidates - this pipeline reports the single strongest candidate.
 
 steps:
-  - name: load-qc
-    kind: execution
-    description: Parse the ASCII light curve, drop flagged / non-finite / zero-error cadences, sort by time, and cache cleaned arrays to disk.
-    inputs:
-      - name: lightcurve_path
-        type: string
-        description: Absolute path to a whitespace-separated ASCII light curve with 4 columns (time, flux, quality flag, flux error) and `#`-prefixed comment lines.
-    script: scripts/load_qc.py
-    inputs_to: preprocess
-
   - name: preprocess
     kind: execution
-    description: Sigma-clip at 3-sigma, flatten with a cadence-chosen Savitzky-Golay window, sigma-clip residuals at 5-sigma, and cache the flattened arrays.
+    description: Load the light curve, drop quality-flagged rows, 5-sigma clip, and flatten with Savitzky-Golay.
     inputs:
-      - name: cleaned_cache
+      - name: light_curve_path
         type: string
-        description: Path to the npz file written by load-qc.
+        description: Absolute or relative path to a whitespace-delimited text file. Columns in order - time (MJD), flux (relative), quality flag, flux error. Lines starting with `#` are comments. Flag convention is standard TESS - 0 means GOOD.
     script: scripts/preprocess.py
-    inputs_to: tls-search
+    inputs_to: broad-search
 
-  - name: tls-search
+  - name: broad-search
     kind: execution
-    description: Broad Transit Least Squares search over the full cadence/baseline-aware period window; reports the best candidate's period, T0, depth, duration, SDE and SNR.
+    description: Broad-range TLS period search; classifies the candidate as very_strong, strong, or weak from its SDE.
     inputs:
-      - name: flattened_cache
+      - name: clean_data_path
         type: string
-        description: Path to the npz file written by preprocess.
-    script: scripts/tls_search.py
-    inputs_to: classify
+        description: Path to the cleaned-light-curve .npz produced by preprocess.
+    script: scripts/broad_search.py
+    inputs_to: by-strength
 
-  - name: classify
-    kind: decision
-    description: Judge how strong the broad-search candidate is, so the router can decide whether refinement is worth running.
-    inputs:
-      - name: period
-        type: float
-        description: Best candidate period from the broad TLS search, in days.
-      - name: sde
-        type: float
-        description: TLS Signal Detection Efficiency of the best candidate.
-      - name: snr
-        type: float
-        description: TLS signal-to-noise ratio of the best candidate.
-      - name: transit_count
-        type: integer
-        description: Number of in-data transits TLS counted at the candidate period.
-    questions:
-      strength:
-        type: choice
-        instructions: >
-          Classify the detection using the TLS SDE/SNR rubric from the source
-          skills. Prefer `strong` when SDE > 9 AND SNR > 7 AND transit_count >= 3;
-          `moderate` when SDE in (6, 9] OR SNR in (5, 7]; `weak` otherwise.
-          A `weak` answer skips refinement so we don't spend compute polishing
-          a false positive.
-        criteria:
-          strong: SDE > 9 and SNR > 7 with at least 3 transits in-data; a very likely real transit signal.
-          moderate: SDE in (6, 9] or SNR in (5, 7]; a plausible candidate worth refining but needing follow-up validation.
-          weak: SDE <= 6 and SNR <= 5, or fewer than 2 transits in-data; probably a false positive.
-    thresholds:
-      strength: 0.6
-    inputs_to: refine-router
-
-  - name: refine-router
+  - name: by-strength
     kind: router
-    description: Strong and moderate candidates are refined; weak candidates skip refinement to save compute.
+    description: Refine the period only when the broad search produced a strong candidate; weak signals skip refinement because tighter uncertainty on noise is meaningless.
     branch_on: strength
     branches:
-      strong: refine
-      moderate: refine
+      very_strong: refine-search
+      strong: refine-search
       weak: end
 
-  - name: refine
+  - name: refine-search
     kind: execution
-    description: Dense TLS pass in a +/-5% window around the candidate period; overwrites period/sde/snr/T0/depth/duration if the refined SDE is at least as high.
+    description: Narrow TLS re-search in a +/-5% window around the candidate for a precise period and uncertainty.
     inputs:
-      - name: flattened_cache
+      - name: clean_data_path
         type: string
-      - name: period
+      - name: candidate_period
         type: float
-      - name: sde
-        type: float
-    script: scripts/refine.py
+        description: Best period from the broad search; the refined grid is centred here.
+    script: scripts/refine_search.py
     inputs_to: end
 
   - name: end
     kind: end
-    description: Final period measurement plus the detection-quality metrics an analyst needs to judge it.
+    description: Final orbital period with uncertainty, signal metrics, and the broad-search transit parameters needed for a follow-up characterization.
     inputs:
-      - name: period
+      - name: period_days
         type: float
-        description: Best-estimate orbital period in days (refined if the refinement improved SDE, otherwise the broad-search value).
-      - name: period_uncertainty
+        description: Best orbital period in days (refined if the broad candidate was strong, else the broad-search candidate).
+      - name: period_uncertainty_days
         type: float
-        description: TLS period uncertainty in days.
-      - name: sde
-        type: float
-        description: TLS Signal Detection Efficiency; >9 very strong, >6 strong, <6 weak.
-      - name: snr
-        type: float
-        description: TLS signal-to-noise ratio of the best candidate.
-      - name: t0
-        type: float
-        description: Mid-transit epoch in the input time system.
-      - name: depth
-        type: float
-        description: Transit depth as a fraction of out-of-transit flux.
-      - name: duration
-        type: float
-        description: Transit duration in days.
       - name: strength
         type: string
-        description: Classification label from the classify step (`strong`, `moderate`, `weak`).
+        description: One of very_strong, strong, weak - derived from the broad-search SDE.
+      - name: final_sde
+        type: float
+      - name: final_snr
+        type: float
+      - name: candidate_t0
+        type: float
+        description: Mid-transit epoch of the first transit, in the input time system.
+      - name: candidate_duration
+        type: float
+        description: Transit duration in days.
+      - name: candidate_depth
+        type: float
+        description: Fractional transit depth (1 - min(model_flux)).
 
 anti_patterns:
-  - Searching a period window wider than baseline/2. Fewer than two transits in-data cannot be refined and almost always aliases.
-  - Flattening with a window shorter than the expected transit duration. The Savitzky-Golay filter will absorb the dip and the transit will vanish.
-  - Reporting the broad-search period without refinement when the detection is strong. The broad grid is coarse by design; refinement typically reduces period error by 10-50x.
-  - Dropping flux_err or passing zeros to TLS. TLS requires finite positive weights and will raise.
-  - Trusting a period with transit_count < 2 or a visible odd/even depth mismatch; both are classic eclipsing-binary / aliasing signatures. See `references/troubleshooting.md`.
+  - Running TLS without passing flux_err - it is required, not optional, and omitting it degrades every weight in the search.
+  - Choosing a flattening window shorter than the transit duration; a too-short Savitzky-Golay window erases shallow dips.
+  - Trusting a weak-branch result (SDE < 6) as a confirmed detection; report it as a candidate pending more data.
+  - Picking Lomb-Scargle over TLS for transit detection - LS is less sensitive to box-shaped dips and may lock onto a harmonic.
+  - Reporting a period that is exactly half or double a plausible one without checking the phase-folded transit for odd-even depth consistency.
+  - Over-aggressive sigma clipping (sigma 2-3) that removes in-transit points along with the outliers.
+  - Searching a period range larger than baseline / 2 - any longer period gives at most one transit and cannot be verified.
 ```

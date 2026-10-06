@@ -1,86 +1,77 @@
-# MATPOWER network.json format reference
+# MATPOWER-format Network Data (as used by this skill)
 
-Network data uses the MATPOWER case format (via PGLib-OPF benchmark cases,
-`github.com/power-grid-lib/pglib-opf`). Load with `json.load`; the files
-can run into tens of MB, so never `cat`/`head`/`sed` them.
+Network files follow the MATPOWER case convention (via the PGLib-OPF
+benchmark). The JSON file at `network_path` has this shape:
 
-```python
-import json
-with open('network.json') as f:
-    data = json.load(f)
+```json
+{
+  "name": "...",
+  "baseMVA": 100.0,
+  "bus":     [[ ... ], ...],
+  "gen":     [[ ... ], ...],
+  "branch":  [[ ... ], ...],
+  "gencost": [[ ... ], ...],
+  "reserve_capacity":   [MW_per_gen, ...],
+  "reserve_requirement": total_MW
+}
 ```
 
-## Top-level keys
-| Key | Type | Description |
-|-----|------|-------------|
-| `baseMVA` | float | Per-unit base power (typically 100). |
-| `bus` | list[list] | Bus rows (see below). |
-| `gen` | list[list] | Generator rows. |
-| `branch` | list[list] | Transmission line / transformer rows. |
-| `gencost` | list[list] | Generator cost polynomials (MODEL=2). |
-| `reserve_capacity` | list[float] | Max reserve MW each generator can hold. |
-| `reserve_requirement` | float | System-wide minimum reserve MW. |
+All electrical quantities are in SI units in the arrays; the solver
+converts to per-unit using `baseMVA` where needed.
 
-## Per-unit conversions
-```
-P_pu = P_MW / baseMVA
-Q_pu = Q_MVAr / baseMVA
-```
+Files can be large (100 K+ lines for realistic grids). Always parse
+with `json.load`; never scan line-by-line with `sed`/`head`.
 
-## Bus row (columns used)
-| Idx | Field | Notes |
-|-----|-------|-------|
-| 0 | BUS_I | Bus number (may be non-contiguous — build a mapping). |
-| 1 | BUS_TYPE | 1=PQ load, 2=PV gen, 3=slack reference. |
-| 2 | Pd | Real power demand in MW. |
+## bus row — columns
 
-## Generator row (columns used)
-| Idx | Field | Notes |
-|-----|-------|-------|
-| 0 | GEN_BUS | Bus number this generator sits on. |
-| 8 | PMAX | Max real power output (MW). |
-| 9 | PMIN | Min real power output (MW). |
+| Index | Field  | Description                             |
+|-------|--------|-----------------------------------------|
+| 0     | BUS_I  | Bus number (may be non-contiguous)      |
+| 1     | TYPE   | 1=PQ load, 2=PV generator, 3=slack      |
+| 2     | PD     | Real load (MW)                          |
+| 3     | QD     | Reactive load (MVAr) — unused by DC-OPF |
+| 9     | BASEKV | Nominal voltage                         |
 
-## Branch row (columns used)
-| Idx | Field | Notes |
-|-----|-------|-------|
-| 0 | F_BUS | From-bus number. |
-| 1 | T_BUS | To-bus number. |
-| 2 | BR_R | Resistance (pu) — ignored in DC approx. |
-| 3 | BR_X | Reactance (pu). Susceptance = 1/X. |
-| 4 | BR_B | Line charging susceptance (pu). |
-| 5 | RATE_A | MVA thermal limit — the long-term rating. |
-| 10 | BR_STATUS | 1=in service, 0=out. |
+Always build a `bus_num_to_idx` mapping; row position ≠ bus number.
 
-## Gencost row (MODEL=2 polynomial)
-| Idx | Field | Notes |
-|-----|-------|-------|
-| 0 | MODEL | 2 = polynomial. |
-| 1 | STARTUP | $. |
-| 2 | SHUTDOWN | $. |
-| 3 | NCOST | Number of coefficients. |
-| 4+ | coeffs | Highest order first: `[c2, c1, c0]` for quadratic. |
+## gen row — columns
 
-`Cost(P_MW) = c2 * P^2 + c1 * P + c0` ($/hr).
+| Index | Field    | Description                 |
+|-------|----------|-----------------------------|
+| 0     | GEN_BUS  | Bus number (1-indexed)      |
+| 8     | PMAX     | Maximum real power (MW)     |
+| 9     | PMIN     | Minimum real power (MW)     |
 
-## Bus-number mapping
-Bus IDs are not guaranteed to be 1..n. Always build:
-```python
-bus_num_to_idx = {int(buses[i, 0]): i for i in range(n_bus)}
-f = bus_num_to_idx[int(branch_row[0])]
-```
-Never do `branch_row[0] - 1`.
+## branch row — columns
 
-## Slack bus
-Exactly one bus has `BUS_TYPE == 3`. Its angle is fixed to 0 in the DC-OPF
-constraint set — the reference for every other θ.
+| Index | Field  | Description                 |
+|-------|--------|-----------------------------|
+| 0     | F_BUS  | From-bus number             |
+| 1     | T_BUS  | To-bus number               |
+| 2     | BR_R   | Resistance (pu) — unused    |
+| 3     | BR_X   | Reactance (pu)              |
+| 4     | BR_B   | Line charging (pu) — unused |
+| 5     | RATE_A | Thermal limit (MVA)         |
+| 10    | STATUS | 1=in service                |
 
-## Typical generator cost ranges
-| Type | c2 ($/MW²·hr) | c1 ($/MWh) | c0 ($/hr) |
-|------|---------------|------------|-----------|
-| Nuclear | 0.001 | 5–10 | 500–1000 |
-| Coal | 0.005–0.01 | 15–25 | 200–400 |
-| Gas CCGT | 0.01–0.02 | 25–40 | 100–200 |
-| Gas Peaker | 0.02–0.05 | 50–80 | 50–100 |
+## gencost row — polynomial type
 
-Marginal cost at output `P`: `2*c2*P + c1`.
+| Index | Field    | Description                              |
+|-------|----------|------------------------------------------|
+| 0     | MODEL    | 2 = polynomial                           |
+| 1     | STARTUP  | Startup cost ($)                         |
+| 2     | SHUTDOWN | Shutdown cost ($)                        |
+| 3     | NCOST    | Number of coefficients                   |
+| 4+    | coeffs   | Highest-order first                      |
+
+- NCOST=3 (quadratic): coeffs = [c2, c1, c0] → `c2*P² + c1*P + c0` ($/hr, P in MW)
+- NCOST=2 (linear):    coeffs = [c1, c0]    → `c1*P + c0`
+- NCOST=1 (constant):  coeffs = [c0]        → `c0`
+
+Marginal cost at output P (quadratic): `2*c2*P + c1` ($/MWh).
+
+## Reserve fields
+
+- `reserve_capacity[i]` — upper bound on reserve each generator i can
+  supply (MW).
+- `reserve_requirement` — minimum total system reserves required (MW).

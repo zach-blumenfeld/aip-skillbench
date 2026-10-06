@@ -1,77 +1,35 @@
-You are the first step of the `{meta.name}` procedure. Extract the structured
-parameters that the downstream `compute` script needs, and pass the data-file
-paths through unchanged.
+# Parse the user's earthquake/plate request
 
-## User's request
+You are turning a free-form user request into the parameters the compute
+step needs. Return your answer as a JSON object with these keys:
 
-{request}
+- `plate_code` (string): the two-letter PB2002 plate code to analyze
+  (e.g., `PA` Pacific, `NA` North America, `SA` South America, `EU`
+  Eurasia, `AF` Africa, `AN` Antarctica, `AU` Australia, `IN` India,
+  `NZ` Nazca, `JF` Juan de Fuca, `PH` Philippine, `CO` Cocos, `CA`
+  Caribbean, `AR` Arabia, `SO` Somalia, `SC` Scotia). Look up the code
+  in `references/pb2002-plate-codes.md` if the user names a plate instead.
+- `metric` (string, one of `furthest`, `nearest`, `mean`, `median`):
+  what statistic to compute over the per-earthquake distances. Map:
+  - "farthest / furthest / deepest-interior / most interior" → `furthest`
+  - "closest / nearest / shortest" → `nearest`
+  - "average / mean" → `mean`
+  - "median / typical" → `median`
+  Default to `furthest` if the user did not say.
+- `boundary_scope` (string, one of `plate`, `all`): which plate
+  boundary segments count as "the boundary." Default to `plate` — only
+  boundary segments that touch the target plate (where `PlateA` or
+  `PlateB` equals `plate_code`). Use `all` only if the user explicitly
+  asks for distance to any plate boundary on Earth.
 
-## Data files already located (pass through verbatim)
+## User request
 
-- `plates_path`: {plates_path}
-- `boundaries_path`: {boundaries_path}
-- `earthquakes_path`: {earthquakes_path}
+{user_request}
 
-## What to extract
+## Known inputs
 
-Return a single JSON object with exactly these keys:
+- Earthquakes GeoJSON: `{earthquakes_path}`
+- Plates GeoJSON: `{plates_path}`
+- Boundaries GeoJSON: `{boundaries_path}`
 
-```json
-{{
-  "request": "<the original request, verbatim>",
-  "plates_path": "<passthrough>",
-  "boundaries_path": "<passthrough>",
-  "earthquakes_path": "<passthrough>",
-  "plate_code": "<two-letter PB2002 code, uppercase>",
-  "extremum": "furthest" | "closest",
-  "top_n": <positive integer>
-}}
-```
-
-### `plate_code` — PB2002 two-letter codes
-
-Map the plate the user names to its PB2002 code. If the user already gave a
-two-letter code, uppercase it and use it. If no plate is identified at all,
-default to `"PA"` (Pacific) — the canonical example in this domain.
-
-| Plate (any surface form)             | Code |
-|--------------------------------------|------|
-| Pacific                              | PA   |
-| North American / North America       | NA   |
-| South American / South America       | SA   |
-| Eurasian / Eurasia                   | EU   |
-| African / Africa                     | AF   |
-| Indian / India                       | IN   |
-| Australian / Australia               | AU   |
-| Antarctic / Antarctica               | AN   |
-| Nazca                                | NZ   |
-| Juan de Fuca                         | JF   |
-| Cocos                                | CO   |
-| Caribbean                            | CA   |
-| Arabian / Arabia                     | AR   |
-| Philippine Sea / Philippine          | PS   |
-| Scotia                               | SC   |
-| Okhotsk                              | OK   |
-
-Any other named PB2002 plate: use its standard two-letter code (e.g. Sunda =
-SU, Yangtze = YA, Amur = AM, Somalia = SO). If the user names something that
-is not a tectonic plate, still default to `"PA"` and keep going — the script
-will raise a clear error listing the available plate identifiers if the code
-is wrong.
-
-### `extremum`
-
-- `"closest"` when the user asks about the earthquake nearest to the plate
-  boundary (keywords: nearest, closest, near, shortest distance).
-- `"furthest"` otherwise, including the common "most interior",
-  "deepest inside", "furthest from any boundary", or when the user does not
-  specify. This is the canonical question.
-
-### `top_n`
-
-- `1` by default and whenever the user asks for "the" earthquake.
-- Otherwise, the integer the user names ("top 5", "three furthest", etc.).
-
-## Output
-
-Return the JSON object only. No surrounding prose, no code fences.
+Return only the JSON object. No prose, no code fence.

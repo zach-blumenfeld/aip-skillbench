@@ -1,68 +1,70 @@
-# Geopandas / PB2002 cheatsheet
+# geopandas cheatsheet — plate/earthquake distance workflow
 
-Load this reference if you need to debug `compute` output, decide whether to
-revise the parsed parameters, or explain a surprising result. The invariants
-below are the ones the pipeline enforces; if a user question collides with
-one of them, trust the invariant.
+Load `compute_distance.py` first — this file is only for understanding
+*why* the script is written the way it is, or for porting the same logic
+into another tool.
 
-## Coordinate systems — the one invariant that matters
+## The one rule that fails tasks silently
 
-| CRS | Role | Units |
-|-----|------|-------|
-| `EPSG:4326` (WGS84) | Storage, display, spatial filtering (`.within()`) | Degrees (lon/lat) |
-| `EPSG:4087` (World Equidistant Cylindrical) | **Distance calculations** | Metres |
+**Never compute `.distance()` on EPSG:4326 geometries.** Those are
+degrees of latitude/longitude — one degree is ~111 km at the equator and
+0 km at the poles. The number returned is unitless garbage. Always
+re-project both operands to a metric CRS first:
 
-**Never calculate distances directly in EPSG:4326** — degrees are not equal
-distances everywhere on Earth. Project to `EPSG:4087` first, measure in
-metres, then divide by 1000 for kilometres. The compiled script does this
-unconditionally; do not hand-roll Haversine formulas on top of the result.
+```python
+METRIC_CRS = "EPSG:4087"  # World Equidistant Cylindrical, meters
+eq_proj = gdf_eq.to_crs(METRIC_CRS)
+bounds_proj = gdf_boundaries.to_crs(METRIC_CRS)
+distance_m = eq_proj.geometry.distance(bounds_proj.geometry.unary_union)
+```
 
-## Pipeline the script runs
+Divide meters by 1000 to get kilometers. The source skill notes
+EPSG:4087 as the default; any true-metric projected CRS is fine as long
+as both sides are in the same one.
 
-1. `gpd.read_file(plates_path)` → polygons, EPSG:4326.
-2. `gpd.read_file(boundaries_path)` → lines, EPSG:4326.
-3. Earthquakes: `gpd.read_file(earthquakes_path)` first; if that yields no
-   geometry, parse the JSON manually and build `Point(lon, lat)` features in
-   EPSG:4326.
-4. Filter plates: match the requested PB2002 code against `Code` /
-   `PlateCode`; fall back to substring match on `PlateName` / `Name`.
-   `union_all()` the matching polygons.
-5. `gdf_eq[gdf_eq.within(plate_geom)]` — spatial filter in EPSG:4326 before
-   projecting (filter-then-project is faster and preserves data).
-6. `to_crs("EPSG:4087")` on both the filtered earthquakes and the
-   plate-relevant boundaries.
-7. Filter boundaries: prefer the exact `(PlateA == code) | (PlateB == code)`
-   match; fall back to substring on `Name`. `union_all()` the result into a
-   single multi-line geometry.
-8. `eq_proj.geometry.distance(boundary_geom)` returns metres; divide by 1000
-   for `distance_km`.
-9. `nlargest(top_n, "distance_km")` for `furthest`, `nsmallest` for
-   `closest`.
+## The one method that saves ~1000× work
 
-## Non-obvious things worth knowing
+Combine many boundary segments into a single geometry *before* calling
+`.distance()`:
 
-- For a point strictly inside a plate, the nearest point on *any* global
-  plate boundary lies on a boundary of *that* plate. Filtering boundaries by
-  the plate code is an optimisation, not a correctness fix — but we keep it,
-  because the filter also makes a wrong-plate error (`"XX"`) surface at the
-  boundary-filter step rather than silently returning global distances.
-- `union_all()` is the geopandas-1.0 method. Older code uses `.unary_union`;
-  the script tries `union_all()` first with a `.unary_union` fallback.
-- `.within()` on a FeatureCollection with mixed geometries can return
-  `False` for points exactly on an edge. If `count_in_plate` is suspiciously
-  low, the data is probably coarser than the request assumes — not a bug in
-  the pipeline.
-- Antimeridian: geopandas spatial operations handle it. Do not nudge
-  longitudes by ±360 by hand.
-- Missing geometries: the script drops `gdf.geometry.notna()` rows before
-  filtering.
-- PB2002 codes are case-sensitive in some column names; the script uppercases
-  before comparing.
+```python
+boundary_geom = bounds_proj.geometry.union_all()   # one MultiLineString
+dists = eq_proj.geometry.distance(boundary_geom)   # one call, Series out
+```
 
-## When the script fails
+Looping `for each boundary: for each quake: dist()` is O(N·M) and often
+seconds-to-minutes slow. `union_all()` + a single `.distance()` call is
+one vectorized sweep.
 
-- `No plate matched '<code>'` — the user named a plate the dataset does not
-  carry under that code or substring. The error prints up to 30 identifiers
-  from the plate layer; ask the user which one they meant.
-- Everything else is a data-shape surprise (unexpected column names, empty
-  earthquakes file). The script's stack trace is the source of truth.
+Note on API: on geopandas ≥ 1.0 use `.union_all()` (the method). The
+`.unary_union` attribute still works but emits a DeprecationWarning that
+pollutes script stderr and is slated for removal. Older curated
+examples in this skill's `source/` show `.unary_union`; prefer
+`.union_all()` in new code.
+
+## Spatial filter: earthquakes inside a plate
+
+```python
+plate_geom = gdf_plates[gdf_plates["Code"] == plate_code].geometry.unary_union
+eq_in_plate = gdf_eq[gdf_eq.within(plate_geom)].copy()
+```
+
+`.within()` is a vectorized boolean mask. The `.copy()` prevents later
+column assignment from raising `SettingWithCopyWarning`.
+
+## Picking the extremum
+
+```python
+furthest = eq_in_plate.nlargest(1, "distance_km").iloc[0]
+nearest  = eq_in_plate.nsmallest(1, "distance_km").iloc[0]
+```
+
+## Pitfalls that bit prior runs
+
+| Issue | Problem | Fix |
+|-------|---------|-----|
+| `distance()` in degrees | EPSG:4326 math | project to EPSG:4087 first |
+| Antimeridian wraps | Manual ±360 adjustments | let geopandas handle it; it does |
+| Slow distance | Loop per segment | `unary_union` + one `.distance()` |
+| Missing geometry rows | USGS feed can carry nulls | `gdf[gdf.geometry.notna()]` |
+| Boundary name substring match | `"PA"` matches `PAC-NA` | filter on `PlateA` / `PlateB` instead |

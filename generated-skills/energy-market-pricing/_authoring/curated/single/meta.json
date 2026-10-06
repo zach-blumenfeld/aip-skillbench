@@ -5,8 +5,9 @@
   "single": true,
   "author_model": "claude-opus-4-7",
   "claude_exit": 0,
-  "started_workspace": "energy-market-pricing-curated-single-20261006-194017",
-  "recorded_at": "2026-10-06T19:55:58",
+  "stage_data": "full",
+  "started_workspace": "energy-market-pricing-curated-single-20261006-214731",
+  "recorded_at": "2026-10-06T21:57:46",
   "produced": [
     "energy-market-pricing"
   ],
@@ -14,7 +15,7 @@
     "aip": {
       "remote": "git@github.com:zach-blumenfeld/aip.git",
       "ref": "aip-0.5a0",
-      "sha": "9dee09cd7e450a708f9775664f0668e29853b365"
+      "sha": "58cf546fa7797f6e9ad32080a94e18ff817570ac"
     },
     "aip_spec": {
       "remote": "git@github.com:zach-blumenfeld/aip-spec.git",
@@ -22,7 +23,7 @@
       "sha": "7bdcc5af7418bf37eeb5f587592ac6c3633cb7d4"
     },
     "aip_version": "0.5a1",
-    "recorded_at": "2026-10-06T19:25:06"
+    "recorded_at": "2026-10-06T21:22:05"
   },
-  "workspace": "/Users/zach/dev/aip-skillbench/build/authoring/energy-market-pricing-curated-single-20261006-194017"
+  "workspace": "/Users/zach/dev/aip-skillbench/build/authoring/energy-market-pricing-curated-single-20261006-214731"
 }

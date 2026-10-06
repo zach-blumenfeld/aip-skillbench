@@ -1,7 +1,7 @@
 ---
 name: energy-market-pricing
-description: Clear a wholesale energy market on a MATPOWER-format power system by solving a DC-OPF with operating-reserve co-optimization, extracting locational marginal prices (LMPs) and the reserve clearing price from constraint duals, flagging transmission lines at or near their thermal limit, and optionally running a counterfactual that relaxes the most binding line to quantify congestion cost. Use whenever the task asks for nodal electricity prices, generator dispatch and reserves, binding transmission constraints, or congestion / shadow-price impact analysis on a PGLib-OPF-style network.json.
-compatibility: Scripts require Python with numpy and cvxpy (CLARABEL solver). The reference Dockerfile under source/ bootstraps Python; the scripts install cvxpy on first invocation if it is missing — see scripts/_dcopf.py for the imports.
+description: "Clear a DC electricity market on a MATPOWER-format power system network — jointly dispatch generation and operating reserves, extract locational marginal prices (LMPs) and the reserve clearing price from the optimization duals, identify binding transmission constraints, and report total cost, load, generation, and reserves. Use when asked to compute LMPs, nodal prices, DC-OPF with reserve co-optimization, congestion analysis, or an energy market clearing result from a `network.json` MATPOWER file."
+compatibility: Reproduces the task's container (python3 + pip) if numpy/cvxpy/clarabel are missing. For local `aip run` with the CLI's own Python, pre-install deps into `./scratch/venv` and prefix the command with the venv's PYTHONPATH.
 metadata:
   aip-version: "0.5a1"
 ---
@@ -28,126 +28,88 @@ The state is one JSON object. It starts as the start step's `inputs` and flows a
 
 ```yaml
 purpose: >
-  Clear a wholesale energy market on a PGLib-OPF-style power network. A
-  script solves the DC-OPF with reserve co-optimization and pulls LMPs
-  from nodal-balance duals and the reserve MCP from the reserve-requirement
-  dual. The client decides whether a counterfactual on the most binding
-  line is warranted; if yes, a second script relaxes that line and
-  measures the congestion-relief impact. The client then renders a
-  market-pricing report.
+  Clear a DC electricity market on a MATPOWER-format power system network:
+  jointly dispatch generation and operating reserves to minimize total cost
+  subject to generator limits, reserve-capacity coupling, nodal power balance
+  (DC approximation), and line thermal limits; then extract locational
+  marginal prices and the reserve clearing price from the optimization duals,
+  identify binding transmission constraints, and report system totals.
 
 trigger_when:
-  - A request to compute nodal electricity prices (LMPs) on a MATPOWER / PGLib-OPF network.json.
-  - A request to find the cheapest generator dispatch meeting load and reserve requirements on a power grid, with or without transmission constraints.
-  - A request to identify binding transmission constraints and quantify their congestion cost (shadow price, cost-reduction counterfactual).
-  - A request for a wholesale-market clearing report including dispatch, reserves, LMPs, reserve MCP, and congestion diagnostics.
+  - Compute LMPs or nodal electricity prices for a given power system network.
+  - Run DC optimal power flow with operating-reserve co-optimization.
+  - Identify binding transmission constraints and congestion rents.
+  - Produce an energy market clearing (dispatch, prices, reserves) from a MATPOWER-format `network.json`.
+  - Set up a baseline for counterfactual analysis of transmission constraints.
 
 do_not_use_when:
-  - The task requires AC power flow (voltage magnitudes, reactive power, line losses) — DC approximation is used here.
-  - The task is unit commitment with startup / shutdown decisions — this is a single-period dispatch, not a MILP commitment problem.
-  - The network data is in a non-MATPOWER format (RAW, CIM, PSS/E) and no conversion is provided.
+  - Full AC power flow is required — voltage magnitudes, reactive power, or losses must be modeled.
+  - Unit commitment is required — generator on/off binary decisions, startup/shutdown costs over time.
+  - Multi-period / stochastic dispatch across time intervals is required.
+  - The network file is not MATPOWER-shaped (no `bus`/`gen`/`branch`/`gencost` arrays).
 
 steps:
-  - name: solve-base
+  - name: clear-market
     kind: execution
     description: >
-      Load the MATPOWER-format network.json, build the susceptance matrix,
-      solve DC-OPF with reserve co-optimization, and return the base-case
-      dispatch, LMPs, reserve MCP, line flows, and binding-line list.
+      Load the MATPOWER-format network at `network_path`, build the DC susceptance
+      matrix from branch reactances using a bus-number→index mapping, formulate a
+      CVXPY DC-OPF problem with reserve co-optimization (per-generator Pmin/Pmax,
+      reserve non-negativity, reserve capacity, Pg+Rg≤Pmax coupling, system
+      reserve requirement, slack-bus angle = 0, nodal balance per bus, line
+      thermal limits), solve with CLARABEL, then extract per-generator dispatch
+      and reserves (MW), per-bus LMPs ($/MWh, scaled by baseMVA from the
+      balance-constraint duals), the reserve clearing price ($/MWh from the
+      reserve constraint dual), lines at ≥99% loading, and system totals (cost,
+      load, generation, reserves). Script bootstraps numpy, cvxpy, and clarabel
+      if the container lacks them. Consult `references/matpower-format.md` for
+      the bus/gen/branch/gencost column layouts and `references/dc-opf-formulation.md`
+      for the full LP/QP formulation, dual→LMP scaling, binding-line definition,
+      solver choice, and the counterfactual-analysis sketch.
     inputs:
       - name: network_path
         type: string
-        description: Absolute or working-directory-relative path to the MATPOWER-format network.json file.
-    script: scripts/solve_base.py
-    inputs_to: evaluate-counterfactual
-
-  - name: evaluate-counterfactual
-    kind: decision
-    description: >
-      Decide whether a counterfactual that relaxes the most binding line
-      is warranted. Only meaningful when the base case has at least one
-      binding line (loading ≥ 99%).
-    inputs:
-      - name: base_results
-        type: object
         description: >
-          The base DC-OPF solve. Includes `binding_lines` (list of lines
-          at ≥99% loading) and `cost_dollars_per_hour`.
-    questions:
-      counterfactual_decision:
-        type: choice
-        instructions: >
-          Should we run a counterfactual that relaxes the most binding
-          transmission line and measures the cost / LMP impact?
-        criteria:
-          run: >
-            `base_results.binding_lines` is non-empty — the system is
-            congested and quantifying the shadow price of the most
-            binding line adds information to the report.
-          skip: >
-            `base_results.binding_lines` is empty, OR the request
-            explicitly asked for base-case pricing only without
-            counterfactual analysis.
-    thresholds:
-      counterfactual_decision: 0.3
-    inputs_to: route-counterfactual
-
-  - name: route-counterfactual
-    kind: router
-    description: Branch on whether the counterfactual was requested.
-    branch_on: counterfactual_decision
-    branches:
-      run: solve-counterfactual
-      skip: write-report
-
-  - name: solve-counterfactual
-    kind: execution
-    description: >
-      Pick the binding line with the highest loading percentage, multiply
-      its RATE_A by `counterfactual_scale` (default 1.20), re-solve the
-      DC-OPF, and compute cost reduction, per-bus LMP deltas, and whether
-      congestion on the targeted line was relieved.
-    inputs:
-      - name: network_path
-        type: string
-      - name: base_results
-        type: object
-    script: scripts/solve_counterfactual.py
-    inputs_to: write-report
-
-  - name: write-report
-    kind: client_task
-    description: >
-      Render the market-pricing report as markdown from the base solve
-      and (if present) the counterfactual results. Use the template as
-      the authoring guide and emit the finished markdown under `report`.
-    inputs:
-      - name: base_results
-        type: object
-    template: assets/report_template.md
-    references:
-      - path: references/matpower-format.md
-        description: Load only if a bus / gen / branch / gencost column index is unclear while composing the report, or to explain negative LMPs and per-unit vs MW scaling.
-      - path: references/dcopf-formulation.md
-        description: Load only when a result looks surprising (negative LMPs, counterfactual cost that did not decrease, missing reserve MCP) and the economic / mathematical reasoning needs to be checked.
+          Absolute path to a MATPOWER-format JSON file with `baseMVA`, `bus`,
+          `gen`, `branch`, `gencost`, `reserve_capacity`, and `reserve_requirement`.
+          In the task container this is typically `/root/network.json`.
+    script: scripts/solve_dcopf.py
     inputs_to: end
 
   - name: end
     kind: end
-    description: Final state carries the base DC-OPF results and the rendered market-pricing report. Counterfactual keys are present when the counterfactual branch ran.
+    description: >
+      Energy market clearing result. `generator_dispatch` lists each
+      generator's energy output and reserve award in MW; `lmp_by_bus` gives
+      the locational marginal price at every bus in $/MWh (negative values
+      are valid under congestion); `binding_lines` lists transmission lines
+      at ≥99% of thermal limit; `totals` carries cost ($/hr), load,
+      generation, and reserves (all MW); `reserve_mcp_dollars_per_MWh` is
+      the system-wide reserve clearing price.
     inputs:
-      - name: base_results
+      - name: generator_dispatch
+        type: list[*]
+        description: Per-generator records {id, bus, output_MW, reserve_MW, pmax_MW}.
+      - name: lmp_by_bus
+        type: list[*]
+        description: Per-bus records {bus, lmp_dollars_per_MWh}.
+      - name: binding_lines
+        type: list[*]
+        description: Lines with |flow|/RATE_A ≥ 99%; records {from, to, flow_MW, limit_MW}.
+      - name: totals
         type: object
-      - name: report
-        type: string
+        description: System totals {cost_dollars_per_hour, load_MW, generation_MW, reserve_MW}.
+      - name: reserve_mcp_dollars_per_MWh
+        type: float
+        description: Dual value of the system reserve requirement constraint.
 
 anti_patterns:
-  - Reading network.json with sed / head / cat — these files run into the hundreds of thousands of lines; use json.load.
-  - Indexing a bus by `bus_number - 1` instead of a `bus_num_to_idx` map — PGLib cases have non-contiguous bus IDs.
-  - Treating a negative LMP as a bug — negative LMPs are physically valid in congested systems with trapped cheap generation.
-  - Using OSQP for the DC-OPF-with-reserves solve — it is prone to failing on ill-conditioned problems; use CLARABEL.
-  - Re-rounding dispatch, LMPs, or costs in the client_task — the scripts already round for display; re-rounding corrupts precision.
-  - Scaling the reserve-requirement dual by baseMVA — the reserve constraint is written in MW, so its dual is already $/MWh.
-  - Multiplying the nodal-balance dual by baseMVA to get LMPs — the balance constraint is in per-unit so the dual is $/hr-per-pu; divide by baseMVA (not multiply) to land in $/MWh.
-  - Skipping the slack-bus angle fix (`θ[slack] = 0`) — without it, the DC-OPF is under-determined and the solver either errors or returns a meaningless angle vector.
+  - Reading large network JSON files line-by-line with sed/head/tail instead of `json.load` — wastes time and context.
+  - Indexing arrays by `bus_number - 1`. Bus numbers may be non-contiguous; always build and use a `bus_num_to_idx` mapping.
+  - Mis-scaling the LMP. The balance constraint is in per-unit while the cost is a function of `Pg*baseMVA`; the correct conversion is `LMP = dual / baseMVA`. Multiplying instead inflates every LMP by a factor of 10,000 on a `baseMVA = 100` case.
+  - Treating a negative LMP as an error. Negative LMPs are physically valid in congested networks where cheap generation is trapped behind a binding line.
+  - Enforcing total-generation = total-load globally in place of per-bus nodal balance. Doing so collapses the LMP vector to a single system price and hides congestion.
+  - Solving with OSQP. OSQP fails on ill-conditioned DC-OPF-with-reserves problems; use CLARABEL.
+  - Omitting the capacity-coupling constraint `Pg*baseMVA + Rg ≤ Pmax`. Without it, a generator can simultaneously sell more energy than its nameplate and reserve capacity.
+  - Hard-coding NCOST=3 (quadratic). The script branches on `gencost[i, 3]` so linear and constant-cost generators are handled correctly.
 ```
