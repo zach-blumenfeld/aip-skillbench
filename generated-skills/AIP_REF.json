@@ -2,7 +2,7 @@
   "aip": {
     "remote": "git@github.com:zach-blumenfeld/aip.git",
     "ref": "aip-0.5a0",
-    "sha": "9dee09cd7e450a708f9775664f0668e29853b365"
+    "sha": "58cf546fa7797f6e9ad32080a94e18ff817570ac"
   },
   "aip_spec": {
     "remote": "git@github.com:zach-blumenfeld/aip-spec.git",
@@ -10,5 +10,5 @@
     "sha": "7bdcc5af7418bf37eeb5f587592ac6c3633cb7d4"
   },
   "aip_version": "0.5a1",
-  "recorded_at": "2026-10-06T19:25:06"
+  "recorded_at": "2026-10-06T21:22:05"
 }

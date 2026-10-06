@@ -257,6 +257,11 @@ def eval(
         help="aip-runtime only: give the in-container aip server TYPESAFE_API_KEY from .env so "
              "decision steps are answered by the decision model. Off = the solver answers each pause.",
     ),
+    step_timeout: int = typer.Option(
+        1800, "--step-timeout",
+        help="aip-runtime: seconds an execution step may run on the in-container server "
+             "before it is killed (AIP_STEP_TIMEOUT; 0 = no limit). Default 1800, the agent's own budget.",
+    ),
     aip_nudge: bool = typer.Option(
         True, "--aip-nudge/--no-aip-nudge",
         help="aip-spec / aip-runtime: write that mode's ~/.claude/CLAUDE.md memory in the sandbox. "
@@ -331,11 +336,17 @@ def eval(
         env[PUBLISH_ENV] = str(packs[0])
         if aip_nudge:
             env[NUDGE_ENV] = mode.value
+        # The server's default per-step timeout. aip's built-in default is 60 s, which a
+        # correct but slow script exceeds on a 1-CPU task container (TLS took 73 s), while
+        # the same step has no limit when the solver runs it by hand in aip-spec. Give the
+        # protocol the same budget as the agent.
+        server_env: dict[str, str] = {"AIP_STEP_TIMEOUT": str(step_timeout)}
         if decision_model:
             key = _read_dotenv(ROOT / ".env").get("TYPESAFE_API_KEY") or os.environ.get("TYPESAFE_API_KEY")
             if not key:
                 raise typer.BadParameter("--decision-model needs TYPESAFE_API_KEY in .env or the environment")
-            env[SERVER_EXTRA_ENV] = json.dumps({"TYPESAFE_API_KEY": key})
+            server_env["TYPESAFE_API_KEY"] = key
+        env[SERVER_EXTRA_ENV] = json.dumps(server_env)
         extra = [
             "--skills-dir", str(runtime_skills),
             "--agent-env", f"AIP_SERVER={AIP_SERVER_URL}",
