@@ -5,8 +5,9 @@
   "single": true,
   "author_model": "claude-opus-4-7",
   "claude_exit": 0,
-  "started_workspace": "exoplanet-detection-period-curated-single-20261006-194017",
-  "recorded_at": "2026-10-06T19:57:18",
+  "stage_data": "sample",
+  "started_workspace": "exoplanet-detection-period-curated-single-20261006-203037",
+  "recorded_at": "2026-10-06T20:44:08",
   "produced": [
     "exoplanet-period-detection"
   ],
@@ -24,5 +25,5 @@
     "aip_version": "0.5a1",
     "recorded_at": "2026-10-06T19:25:06"
   },
-  "workspace": "/Users/zach/dev/aip-skillbench/build/authoring/exoplanet-detection-period-curated-single-20261006-194017"
+  "workspace": "/Users/zach/dev/aip-skillbench/build/authoring/exoplanet-detection-period-curated-single-20261006-203037"
 }

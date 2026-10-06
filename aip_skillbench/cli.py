@@ -354,7 +354,15 @@ CLIs are on PATH), the line-by-line completeness check against the sources, and 
 functional test: write realistic start inputs to ./scratch/start.json (test inputs
 never go inside the pack) and run `aip run ./out/<skill-name> --input
 ./scratch/start.json`, answering each pause with `aip resume <run-file> --input
-<answer.json>`, through to the end step. Nobody is watching this session: do not ask
+<answer.json>`, through to the end step. When ./inputs/environment/data/ exists it
+holds the input files the skill will be run on, with MANIFEST.md listing their real
+names and sizes. Unless the manifest says otherwise they are truncated to their first
+2 KB: enough to see the real format (header lines, delimiters, column order, cadence,
+units, encoding) but not the content. Every loader, default, and assumption in the
+pack must hold for those files exactly as they are; build the functional test's inputs
+in the same format (synthesize a full-length file in ./scratch/ that mimics them). Do
+not derive or hardcode an expected answer; the pack must compute it from whatever
+file it is given. Nobody is watching this session: do not ask
 questions, and skip the checklist's install step (write straight to the destination
 below). Everything you may read is under ./inputs/ and everything you write goes
 under ./out/ or ./scratch/; do not look anywhere else on this machine. Scripts run
@@ -472,6 +480,12 @@ def convert(
     keep_workspace: bool = typer.Option(
         False, "--keep-workspace", help="Keep build/authoring/<workspace> after the run (debugging)."
     ),
+    stage_data: str = typer.Option(
+        "sample", "--stage-data",
+        help="--from curated: what the author sees of the task's environment/ inputs: "
+             "'sample' (first 2 KB of each file + manifest; format only), 'full' (the real "
+             "files; the author could derive the answer; recorded in meta.json), or 'none'.",
+    ),
 ) -> None:
     """Produce an AIP skill pack for `task`, by Opus authoring offline in a sandboxed workspace.
 
@@ -490,6 +504,8 @@ def convert(
     """
     from aip_skillbench import _authoring as A
 
+    if stage_data not in ("sample", "full", "none"):
+        raise typer.BadParameter("--stage-data must be sample, full, or none")
     _require_aip()
     task_dir = _task_dir(task)
     dst_root = _generated_skills_dir(task, from_)
@@ -506,19 +522,19 @@ def convert(
         skills = sorted(p.name for p in src_root.iterdir() if p.is_dir() and (p / "SKILL.md").exists()) if src_root.exists() else []
         if not skills:
             raise typer.BadParameter(f"no skill dirs (with SKILL.md) under {src_root}")
-        dockerfile = task_dir / "environment" / "Dockerfile"
+        env_dir = task_dir / "environment"
         if single:
             jobs.append((
                 "single",
                 _PROMPT_FROM_CURATED_SINGLE.format(skill_names=", ".join(skills), checklist=_CHECKLIST_NOTE),
-                lambda ws: A.stage_curated(ws, src_root, dockerfile),
+                lambda ws: A.stage_curated(ws, src_root, env_dir, stage_data),
             ))
         else:
             for name in skills:
                 jobs.append((
                     name,
                     _PROMPT_FROM_CURATED.format(name=name, checklist=_CHECKLIST_NOTE),
-                    lambda ws: A.stage_curated(ws, src_root, dockerfile),
+                    lambda ws: A.stage_curated(ws, src_root, env_dir, stage_data),
                 ))
     else:
         instruction = task_dir / "instruction.md"
@@ -538,7 +554,7 @@ def convert(
         audit = A.audit_transcript(transcript, ws)
         meta = {
             "task": task, "from": from_.value, "label": label, "single": single,
-            "author_model": author_model, "claude_exit": rc,
+            "author_model": author_model, "claude_exit": rc, "stage_data": stage_data,
             "started_workspace": ws.name, "recorded_at": datetime.now().isoformat(timespec="seconds"),
         }
         produced = A.finalize(ws, dst_root, record_dir / label, audit, meta, keep_workspace)
@@ -593,7 +609,7 @@ def _already_done(task: str, from_: ConvertFrom) -> bool:
 
 
 def _convert_one(
-    task: str, from_value: str, author_model: str, force: bool, single: bool = False
+    task: str, from_value: str, author_model: str, force: bool, single: bool = False, stage_data: str = "sample"
 ) -> tuple[str, str, int, float, str]:
     """Run one `aip-skillbench convert` invocation as a subprocess. Returns (task, from, rc, secs, tail)."""
     import time
@@ -606,6 +622,8 @@ def _convert_one(
         cmd.append("--force")
     if single and from_value == "curated":
         cmd.append("--single")
+    if stage_data != "sample":
+        cmd += ["--stage-data", stage_data]
     t0 = time.time()
     proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
     secs = time.time() - t0
@@ -631,6 +649,7 @@ def batch_convert(
         False, "--single/--per-skill",
         help="Curated side: compile all curated skills into one AIP procedure per task.",
     ),
+    stage_data: str = typer.Option("sample", "--stage-data", help="sample | full | none (see convert)."),
 ) -> None:
     """Author AIP skills for many tasks at once. Skips already-converted output unless --force."""
     import concurrent.futures
@@ -681,7 +700,7 @@ def batch_convert(
     done = failed = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as ex:
         futures = {
-            ex.submit(_convert_one, task, f.value, author_model, force, single): (task, f.value)
+            ex.submit(_convert_one, task, f.value, author_model, force, single, stage_data): (task, f.value)
             for task, f in work
         }
         total = len(futures)

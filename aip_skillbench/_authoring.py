@@ -75,14 +75,73 @@ def make_workspace(task: str, from_: str) -> Path:
     return ws
 
 
-def stage_curated(ws: Path, curated_root: Path, dockerfile: Path | None) -> list[str]:
+SAMPLE_BYTES = 2048
+_ENV_SKIP = {"skills", "_deps", "Dockerfile", "__pycache__", ".DS_Store"}
+
+
+def _sample_file(src: Path, dst: Path) -> None:
+    """First SAMPLE_BYTES of a file, whole lines when it is text, raw bytes otherwise."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    data = src.read_bytes()[: SAMPLE_BYTES + 512]
+    try:
+        text = data.decode("utf-8")
+        cut = text[:SAMPLE_BYTES]
+        if len(text) > SAMPLE_BYTES and "\n" in cut:
+            cut = cut[: cut.rfind("\n") + 1]
+        dst.write_text(cut)
+    except UnicodeDecodeError:
+        dst.write_bytes(data[:SAMPLE_BYTES])
+
+
+def stage_environment(ws: Path, env_dir: Path, mode: str) -> list[str]:
+    """The task's environment/ (inputs the skill will run on), never tests/ or solution/.
+
+    mode "sample" (default): every file truncated to its first SAMPLE_BYTES under its
+    real relative name, plus MANIFEST.md with true sizes. The author sees headers,
+    delimiters, columns, cadence, and layout, but cannot compute or tune against the
+    benchmark instance. mode "full": the files as they are (recorded in meta.json;
+    the author could derive the answer). mode "none": only the Dockerfile.
+    """
+    out = ws / "inputs" / "environment"
+    out.mkdir(parents=True, exist_ok=True)
+    dockerfile = env_dir / "Dockerfile"
+    if dockerfile.exists():
+        shutil.copy2(dockerfile, out / "Dockerfile")
+    staged: list[str] = []
+    if mode == "none":
+        return staged
+    files = sorted(
+        p for p in env_dir.rglob("*")
+        if p.is_file() and not any(part in _ENV_SKIP for part in p.relative_to(env_dir).parts)
+    )
+    lines = ["# Input files the skill will run on", "",
+             "Relative to the task's environment folder; in the container they live where the",
+             "task's instructions say (usually under /root/). Sizes are the real files'.", ""]
+    if mode == "sample":
+        lines += [f"These copies are TRUNCATED to their first {SAMPLE_BYTES} bytes: enough to see the",
+                  "format (header lines, delimiters, column order, cadence, encoding), not the content.",
+                  "Test loaders and defaults against them; do not expect the real signal in them.", ""]
+    for f in files:
+        rel = f.relative_to(env_dir)
+        size = f.stat().st_size
+        lines.append(f"- `{rel}`  {size:,} bytes")
+        if mode == "full":
+            (out / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(f, out / rel)
+        else:
+            _sample_file(f, out / rel)
+        staged.append(str(rel))
+    (out / "MANIFEST.md").write_text("\n".join(lines) + "\n")
+    return staged
+
+
+def stage_curated(ws: Path, curated_root: Path, env_dir: Path | None, data_mode: str = "sample") -> list[str]:
     names: list[str] = []
     for src in sorted(p for p in curated_root.iterdir() if p.is_dir() and (p / "SKILL.md").exists()):
         shutil.copytree(src, ws / "inputs" / "skills" / src.name, ignore=_INPUT_IGNORE)
         names.append(src.name)
-    if dockerfile and dockerfile.exists():
-        (ws / "inputs" / "environment").mkdir()
-        shutil.copy2(dockerfile, ws / "inputs" / "environment" / "Dockerfile")
+    if env_dir and env_dir.is_dir():
+        stage_environment(ws, env_dir, data_mode)
     return names
 
 

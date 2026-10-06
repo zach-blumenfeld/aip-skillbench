@@ -1,55 +1,35 @@
-# Method selection
+# Period-search method selection
 
-TLS, BLS, and Lomb–Scargle solve different problems. Pick before you run.
+This skill defaults to **Transit Least Squares (TLS)** because the input is
+assumed to be a photometric light curve where we care about a *transit-shaped*
+signal. If the input is actually non-transit (stellar rotation, pulsation,
+eclipsing-binary) you likely want Lomb-Scargle; if TLS is unavailable or
+you need a built-in solution, BLS is the alternative.
 
-## Transit Least Squares (TLS) — default for exoplanet transit detection
+## Decision matrix
 
-- Fits a limb-darkened transit template, not a box; most sensitive for
-  shallow transits.
-- Returns an SDE (signal-detection efficiency), SNR, depth, duration,
-  mid-transit time, and transit count.
-- Automatic period grid is dense near short periods; good baseline.
-- Slower than BLS/LS on long time series — budget accordingly.
-- Requires `flux_err`; `transitleastsquares` will refuse to run without
-  it or will produce misleading weights.
+| Signal type / goal                                   | Method              | Why                                          |
+|------------------------------------------------------|---------------------|----------------------------------------------|
+| Transiting exoplanet, flux_err available (default)   | TLS                 | Fits transit shape; most sensitive           |
+| Transit search, cannot install TLS                   | BLS (astropy)       | Built in; box model is good enough           |
+| Rotation / pulsation / general periodicity           | Lomb-Scargle        | Fast; agnostic to signal shape               |
+| Quick first look to spot *any* periodicity           | Lomb-Scargle        | ~10x faster than TLS                         |
+| Grazing / shallow transits                           | TLS                 | Transit-shape fit beats box fit              |
 
-## Box Least Squares (BLS) — astropy-native alternative
+## Why TLS as the default here
 
-- Models the dip as a box (upside-down top-hat). Faster than TLS.
-- Reports period, duration, depth, SNR via `compute_stats`, odd-even
-  depth comparison, and transit count.
-- Period-grid sensitive: use `autopower(duration)` for first-pass; use
-  `power(periods, duration)` on a dense custom grid for refinement.
-- Pick BLS when the user asks for astropy only, or when you need fine
-  grid control.
+- Source `transit-least-squares/SKILL.md`: "most sensitive for transits, handles grazing transits, provides transit parameters."
+- Source `exoplanet-workflows/SKILL.md`: "TLS generally performs better than BLS for exoplanet detection."
+- Source `box-least-squares/SKILL.md`: "Try both! TLS is often more sensitive, but BLS is faster and built-in."
 
-## Lomb–Scargle (LS) — general-purpose periodicity
+## When to deviate
 
-- Not transit-shaped: finds sinusoidal periodicity (rotation,
-  pulsation, EB with sinusoidal flux variations).
-- Use when the goal is "find the dominant period in this star's light
-  curve" rather than "find a transiting planet".
-- Reports period and false-alarm probability; no depth/duration.
-- Fast — good first-pass if the signal shape is unknown.
+The scripts in this skill all run TLS. To switch, either:
+1. Replace `scripts/tls_search.py` and `scripts/refine.py` with BLS equivalents
+   (`astropy.timeseries.BoxLeastSquares.autopower(...)` with a duration grid), or
+2. Run Lomb-Scargle first via `lightkurve.LightCurve.to_periodogram(...)` to find
+   the dominant period, then feed that back in as `period_min` / `period_max`
+   bounds in the state before `tls-search`.
 
-## SDE / SNR / power thresholds
-
-| Metric | Weak | Moderate | Strong |
-| --- | --- | --- | --- |
-| TLS SDE | < 6 | 6–9 | > 9 |
-| TLS SNR | < 5 | 5–7 | > 7 |
-| BLS SNR (depth / depth_err) | < 5 | 5–7 | > 7 |
-| LS FAP | > 1e-2 | 1e-4 – 1e-2 | < 1e-4 |
-
-These thresholds come straight from the TLS paper (Hippke & Heller 2019)
-and the BLS/LS documentation; apply them in the `validate-detection`
-decision.
-
-## Aliases and harmonics
-
-- TLS warns `X of Y transits without data` when gaps make the true
-  period look doubled. Re-check at `2 * period` and `period / 2`.
-- LS peaks at `P/2` and `2P` are common harmonics; the fundamental is
-  usually the strongest, but check both when peaks are close in power.
-- Odd-even depth mismatch > 3σ on BLS/TLS points to an eclipsing binary,
-  not a planet.
+Both are deliberately out of scope for the default pipeline — the agent
+executing this skill may make either call before activating it.

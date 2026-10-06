@@ -1,55 +1,60 @@
-# Troubleshooting
+# Troubleshooting weak or suspicious detections
 
-## Script failures
+Load this when the `classify` decision returns `weak` or `moderate`, or
+whenever the reported period looks implausible.
 
-### `transitleastsquares` complains about `flux_err`
-`load_lightcurve.py` fabricates a MAD-based `flux_err` when the file
-does not supply one. If TLS still raises, verify the lightcurve has
-enough finite points (≥50) and non-zero scatter.
+## Low SDE (< 6)
 
-### `BoxLeastSquares` returns a single-element periodogram
-The time span is too short relative to `period_min`/`period_max`.
-`load_lightcurve.py` clamps `period_max` to half the baseline, but
-very short datasets still produce a degenerate grid. Shorten
-`period_min` or provide more cadences.
+Likely causes, in order of frequency:
 
-### `LombScargle.false_alarm_probability` raises
-Astropy requires an approximation method on some code paths. The
-`search_ls.py` wraps the call in a try/except and reports NaN; treat a
-NaN FAP as "unknown" and lean on the sde-like statistic.
+1. **Over-aggressive preprocessing is eating the transit.** Two sub-cases:
+   - Flattening with a window shorter than the transit duration absorbs the
+     dip. The `preprocess` script picks ~16 hours of coverage; raise it to
+     24–36 hours by editing `preprocess.py` if the transits are long.
+   - A symmetric sigma clip removes in-transit points before the search.
+     This script already uses asymmetric clipping (`sigma_lower=np.inf` on
+     both passes) to avoid it — if you have modified the script to add
+     symmetric low-side clipping and your period came back at 2x the true
+     value with low depth, revert that change.
+2. **Transit depth is near the noise floor.** For Earth-sized planets in
+   TESS data, SDE ~5–6 can still be a real detection; validate with
+   phase-folding and multi-sector stacking before dismissing.
+3. **Period is outside the search window.** Default is
+   `max(0.5 d, 3 x cadence)` to `min(50 d, baseline/2)`. For long-period
+   candidates the baseline/2 cap may be the problem — supply a wider
+   `period_max` only if there are at least two full transits in the data.
+4. **Data gaps during transits** cause TLS to under-count transits. Expect
+   a warning like "X of Y transits without data"; the true period may be
+   twice the reported one.
 
-## Detection anomalies
+## Period is 2x or 0.5x expected
 
-### Period is twice or half of expected
-Classic aliasing from data gaps. Phase-fold at both candidates:
-- odd-even mismatch → the true period is twice (half of them were empty)
-- clean fold at the shorter period → the shorter period is real
+Classic aliasing. Rule-of-thumb checks:
 
-Re-run with `period_min`/`period_max` bracketing the alternative to
-confirm.
+- **Odd/even depth mismatch** at the reported period but matched at `period*2`
+  → the true period is `period*2` and the "transits" are the two eclipses
+  of an eclipsing binary. BLS's `compute_stats()` returns `depth_odd` and
+  `depth_even`; `|depth_odd - depth_even| > 3 * depth_err` is the gate.
+- **Phase-folded gaps** at the reported period that vanish at `period*2`
+  → the alternate transits fell in data gaps; prefer `period*2`.
 
-### High odd-even mismatch (> 3σ)
-Not a planet: likely an eclipsing binary with primary/secondary
-eclipses of different depth. Flag in the final report; do not refine.
+Both cases: re-run `tls-search` with `period_min` / `period_max` bracketed
+tightly around `period*2` and compare SDE.
 
-### Low SDE despite obvious dips
-Over-aggressive flattening is the usual cause. The default Savitzky–
-Golay window is 101 cadences — if a transit is longer than that, the
-flattener erases it. Raise `window_length` (edit `_preprocess.py` or
-pass a custom override) and re-search.
+## Flux_err required error from TLS
 
-### Many TLS "transits without data" warnings
-Data gaps. Consider: (a) widening the search to `2 * period`, (b)
-masking the first transit and searching the remaining data (TLS
-`transit_mask`) for multi-planet systems.
+Non-negotiable per source `transit-least-squares`: TLS crashes without
+flux uncertainties. The `load_qc` script drops any cadence with
+non-positive `flux_err`; if your input file has an all-zero flux-error
+column you must synthesise one (e.g. the standard deviation of the
+flattened residuals) before this skill will run.
 
-## Over-restriction
+## Expected transit depths for sanity-checking
 
-- The `validate-detection` decision collapses the signal strength to
-  a three-level score. If the real detection sits awkwardly between
-  levels (e.g. SDE = 6.1 with 4 transits), consider the thresholds
-  advisory and surface both the raw SDE and the collapsed level to the
-  user.
-- The `pick-method` decision defaults to TLS. For general stellar
-  variability work the agent should still override to LS even if the
-  task description does not say "planet".
+| Planet class     | Depth (relative flux) |
+|------------------|-----------------------|
+| Hot Jupiter      | 0.01 – 0.03           |
+| Super-Earth      | 0.001 – 0.003         |
+| Earth-sized      | 0.0001 – 0.001        |
+
+A reported depth outside this range for the stated SDE is a red flag.
