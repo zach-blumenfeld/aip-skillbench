@@ -211,6 +211,8 @@ def _scan_text(text: str, ws_prefixes: tuple[str, ...]) -> list[str]:
             continue
         if "/" not in p[1:]:
             continue  # a lone "/name" is a JSON pointer, a division, or a top-level dir, never a file we care about
+        if not os.path.exists(p) and not os.path.exists(p.split(":")[0]):
+            continue  # a container path (/root/data.csv, /root/workspace/x.py) written into a fixture or prompt, not a host read
         hits.append(p)
     return hits
 
