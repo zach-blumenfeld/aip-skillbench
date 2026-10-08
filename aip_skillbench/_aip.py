@@ -52,6 +52,10 @@ PUBLISH_ENV = "AIP_SKILLBENCH_PUBLISH"
 # Mode name (`aip-spec` or `aip-runtime`): write that mode's CLAUDE.md memory in the
 # sandbox user's home. Unset = no memory (`--no-aip-nudge`, and every other mode).
 NUDGE_ENV = "AIP_SKILLBENCH_NUDGE"
+# Agent name whose benchflow install command is baked into the task image as an extra
+# layer before the build, so trials skip the per-container `npm install` (which stalls
+# when many containers fetch the package at once). Unset = benchflow's runtime install.
+BAKE_ENV = "AIP_SKILLBENCH_BAKE_AGENT"
 
 
 def aip_cli() -> list[str]:

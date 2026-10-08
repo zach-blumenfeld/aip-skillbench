@@ -56,6 +56,7 @@ from benchflow import sdk as _sdk
 from aip_skillbench._aip import (
     AIP_SERVER_PORT,
     AIP_SERVER_URL,
+    BAKE_ENV,
     NUDGE_ENV,
     PUBLISH_ENV,
     SERVER_ENV,
@@ -240,11 +241,45 @@ async def _publish_pack(env: Any, pack: Path) -> str:
     return ref
 
 
+_BAKE_MARKER = "# aip-skillbench: agent baked into the image"
+
+
+def bake_agent_into_dockerfile(environment_dir: Path, agent: str) -> bool:
+    """Append benchflow's own agent install command to the (staged) task Dockerfile.
+
+    benchflow's runtime install is guarded by `[ -x <agent bin> ] ||`, so a trial on an
+    image built this way skips Node and npm entirely. The layer is cached per task
+    image; only the first build of a task pays for it. Returns True if it appended.
+    """
+    from benchflow.agents.registry import AGENTS
+
+    dockerfile = environment_dir / "Dockerfile"
+    if not dockerfile.exists() or agent not in AGENTS:
+        return False
+    content = dockerfile.read_text()
+    if _BAKE_MARKER in content:
+        return False
+    deps = environment_dir / "_deps"
+    deps.mkdir(exist_ok=True)
+    (deps / "install-agent.sh").write_text("#!/usr/bin/env bash\n" + AGENTS[agent].install_cmd + "\n")
+    dockerfile.write_text(
+        content.rstrip("\n")
+        + f"\n\n{_BAKE_MARKER} ({agent})\n"
+        + "COPY _deps/install-agent.sh /opt/benchflow-install-agent.sh\n"
+        + "RUN bash /opt/benchflow-install-agent.sh\n"
+    )
+    return True
+
+
 async def _patched_start_env_and_upload(
     env: Any, task_path: Path, timing: dict
 ) -> None:
     """Drop-in replacement that ensures /app and /solution exist first, then
     runs the AIP container setup (install, server, publish) the env asks for."""
+    bake = os.environ.get(BAKE_ENV)
+    if bake and hasattr(env, "environment_dir"):
+        if bake_agent_into_dockerfile(Path(env.environment_dir), bake):
+            logger.info("aip-skillbench: baking %s into the task image", bake)
     t0 = datetime.now()
     await env.start(force_build=False)
     timing["environment_setup"] = (datetime.now() - t0).total_seconds()

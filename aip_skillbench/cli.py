@@ -23,6 +23,7 @@ from aip_skillbench._aip import (
     AIP_SPEC_DIR,
     AIP_SPEC_REMOTE,
     AIP_SRC_DIR,
+    BAKE_ENV,
     GENERATED_SKILLS,
     HOST_SKILLS_DIR,
     NUDGE_ENV,
@@ -272,6 +273,11 @@ def eval(
         help="Repeatable KEY=VALUE for the solver process in the container (e.g. "
              "MAX_THINKING_TOKENS=0 for models the bundled harness cannot send thinking params to).",
     ),
+    bake_agent: bool = typer.Option(
+        True, "--bake-agent/--no-bake-agent",
+        help="Bake the agent (Node + its npm package) into the task image once instead of "
+             "npm-installing it in every container; avoids the stall when many trials start at once.",
+    ),
 ) -> None:
     """Run one evaluation in one mode."""
     task_dir = _task_dir(task)
@@ -291,6 +297,8 @@ def eval(
         )
     out = jobs_dir or (JOBS_DIR / f"{task}-{mode.value}-{model}")
     env: dict[str, str] = {}
+    if bake_agent:
+        env[BAKE_ENV] = agent
 
     base = [
         "eval", "create",
