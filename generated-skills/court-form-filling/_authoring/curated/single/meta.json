@@ -1,0 +1,29 @@
+{
+  "task": "court-form-filling",
+  "from": "curated",
+  "label": "single",
+  "single": true,
+  "author_model": "claude-opus-5-5",
+  "claude_exit": 0,
+  "stage_data": "full",
+  "started_workspace": "court-form-filling-curated-single-20261008-100410",
+  "recorded_at": "2026-10-08T10:20:02",
+  "produced": [
+    "pdf-form-filling"
+  ],
+  "aip": {
+    "aip": {
+      "remote": "git@github.com:zach-blumenfeld/aip.git",
+      "ref": "aip-0.5a0",
+      "sha": "58cf546fa7797f6e9ad32080a94e18ff817570ac"
+    },
+    "aip_spec": {
+      "remote": "git@github.com:zach-blumenfeld/aip-spec.git",
+      "ref": "v0.5a1",
+      "sha": "7bdcc5af7418bf37eeb5f587592ac6c3633cb7d4"
+    },
+    "aip_version": "0.5a1",
+    "recorded_at": "2026-10-06T21:22:05"
+  },
+  "workspace": "/Users/zach/dev/aip-skillbench/build/authoring/court-form-filling-curated-single-20261008-100410"
+}

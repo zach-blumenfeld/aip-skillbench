@@ -1,0 +1,7 @@
+{
+  "Market Research Report": ["market research report", "market research", "mrr"],
+  "Product Vision Document": ["product vision document", "product vision", "vision document", "vision doc"],
+  "Product Requirements Document": ["product requirements document", "product requirements", "requirements document", "prd"],
+  "Technical Specifications Document": ["technical specifications document", "technical specification", "tech spec", "technical spec"],
+  "System Design Document": ["system design document", "system design", "design doc", "sdd"]
+}

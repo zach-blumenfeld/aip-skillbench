@@ -3,11 +3,11 @@
   "from": "curated",
   "label": "single",
   "single": true,
-  "author_model": "claude-opus-4-7",
+  "author_model": "claude-opus-5-5",
   "claude_exit": 0,
   "stage_data": "full",
-  "started_workspace": "earthquake-plate-calculation-curated-single-20261006-214731",
-  "recorded_at": "2026-10-06T21:55:40",
+  "started_workspace": "earthquake-plate-calculation-curated-single-20261008-101004",
+  "recorded_at": "2026-10-08T10:18:14",
   "produced": [
     "earthquake-plate-distance"
   ],
@@ -25,5 +25,5 @@
     "aip_version": "0.5a1",
     "recorded_at": "2026-10-06T21:22:05"
   },
-  "workspace": "/Users/zach/dev/aip-skillbench/build/authoring/earthquake-plate-calculation-curated-single-20261006-214731"
+  "workspace": "/Users/zach/dev/aip-skillbench/build/authoring/earthquake-plate-calculation-curated-single-20261008-101004"
 }

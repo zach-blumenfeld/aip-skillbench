@@ -1,0 +1,57 @@
+{
+  "quality": {
+    "_doc": "Flag convention. 'auto' compares point-to-point scatter of the flag==0 and flag!=0 subsets and keeps flag==0 (standard TESS) unless flag!=0 is clearly cleaner and big enough.",
+    "convention": "auto",
+    "cleaner_scatter_ratio": 0.8,
+    "min_subset_fraction": 0.2
+  },
+  "outliers": {
+    "_doc": "Pass 1 before flattening, pass 2 after. Only upward outliers (flares, cosmic rays) are sigma-clipped; downward points are removed only when isolated single-cadence glitches, so transit dips survive.",
+    "pass1_sigma_upper": 3.0,
+    "pass2_sigma_upper": 5.0,
+    "glitch_sigma_lower": 10.0,
+    "glitch_neighbor_sigma": 3.0
+  },
+  "detrend": {
+    "_doc": "Savitzky-Golay flatten window in days (converted to an odd number of cadences). 0.5 d = 361 cadences at TESS 2-min, inside the 300-500 band. The window must exceed the transit duration and be shorter than the rotation period.",
+    "default_window_days": 0.5,
+    "min_window_days": 0.25,
+    "rotation_window_fraction": 0.25,
+    "polyorder": 2,
+    "break_tolerance": 5,
+    "flatten_niters": 3,
+    "flatten_sigma": 3.0,
+    "variability_amp_ratio": 1.0,
+    "variability_fap": 0.001,
+    "transit_like_max_duty": 0.2,
+    "ls_min_period_days": 0.05,
+    "ls_max_period_days": 15.0,
+    "sine_max_iterations": 50,
+    "sine_stop_amp_ratio": 0.5
+  },
+  "search": {
+    "_doc": "Broad TLS search; period range 0 means auto (TLS default minimum, maximum = baseline/2 so >=2 transits).",
+    "tls_oversampling_factor": 3,
+    "tls_duration_grid_step": 1.1,
+    "bls_durations_days": [0.04, 0.06, 0.08, 0.1, 0.12, 0.15, 0.2, 0.25, 0.3],
+    "bls_objective": "likelihood",
+    "n_top_peaks": 5,
+    "harmonic_tolerance": 0.01
+  },
+  "refine": {
+    "_doc": "Narrow TLS around the adopted candidate (source: +/-2-10%, +/-5% typical), then a bounded trapezoid least-squares polish of period and T0.",
+    "window_fraction": 0.05,
+    "tls_oversampling_factor": 10,
+    "tls_duration_grid_step": 1.05,
+    "polish": true,
+    "polish_max_shift_sigma": 3.0
+  },
+  "validation": {
+    "sde_strong": 6.0,
+    "sde_very_strong": 9.0,
+    "snr_reliable": 7.0,
+    "odd_even_sigma": 3.0,
+    "min_transits_with_data": 2,
+    "max_duration_ratio": 2.5
+  }
+}

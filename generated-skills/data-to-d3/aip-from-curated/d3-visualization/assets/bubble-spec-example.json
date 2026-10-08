@@ -1,0 +1,50 @@
+{
+  "title": "World cities: population by continent",
+  "subtitle": "Bubble size = population; color = continent. Hover for details; click a bubble or a row to link them.",
+  "layout": "side-by-side",
+  "output": {
+    "dir": "/abs/path/to/output",
+    "html": "index.html",
+    "js": "js/visualization.js",
+    "css": "css/style.css",
+    "d3": "js/d3.v6.min.js",
+    "d3_version": "6",
+    "data_dir": "data",
+    "copy_data": ["/abs/path/to/data/cities.csv", "/abs/path/to/data/per-city"],
+    "svg": null,
+    "png": null
+  },
+  "data": {"file": "/abs/path/to/data/cities.csv", "key": "city_id"},
+  "bubble": {
+    "size_field": "population",
+    "color_field": "continent",
+    "cluster_field": "continent",
+    "label_field": "city_id",
+    "width": 800,
+    "height": 600,
+    "radius_range": [5, 50],
+    "missing_radius": 10,
+    "legend": true
+  },
+  "tooltip": {
+    "fields": [
+      {"field": "city_id", "bold": true},
+      {"field": "city_name"},
+      {"field": "continent", "label": "Continent"}
+    ],
+    "exclude": [{"field": "continent", "equals": "Unknown"}]
+  },
+  "table": {
+    "columns": [
+      {"field": "city_id", "label": "City ID"},
+      {"field": "city_name", "label": "City"},
+      {"field": "continent", "label": "Continent"},
+      {"field": "population", "label": "Population", "format": "abbrev"}
+    ],
+    "missing_text": "-",
+    "sortable": true,
+    "sort_by": null
+  },
+  "link": true,
+  "series": null
+}

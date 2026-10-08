@@ -1,0 +1,642 @@
+{
+ "SC-100": {
+  "match_prefix": "SC-100[0].",
+  "title": "California Judicial Council SC-100, Plaintiff's Claim and ORDER to Go to Small Claims Court (Rev. January 1, 2026)",
+  "notes": [
+   "Plaintiff fills pages 2-4 plus the page-1 court name/address box. Clerk fills case number, trial dates, clerk signature; the court fills the page 5/6 'Need help?' boxes.",
+   "Yes/No questions (items 4, 7, 8, 9, 10) are pairs of separate checkboxes: [0] is Yes (checked value /1), [1] is No (checked value /2). Check exactly one per pair.",
+   "Item 5 a-e are five separate checkboxes with checked values /1../5; check exactly one. Item 6 is the zip of that place.",
+   "Item 3 amount: '$' is pre-printed \u2014 write the figure without '$', as the facts state it (e.g. 1500 or 1,500.00). Item 10 (more than $2,500?) follows from the item 3 amount; the fill script sets/enforces it.",
+   "Plaintiff (list names) header repeats on pages 2, 3, 4 with identical text; the fill script copies it if only one is given.",
+   "Mailing-address fields only when different from the street address. Agent-for-service fields only for corporation/LLC/public-entity defendants.",
+   "Limits: individuals may claim up to $12,500; corporations/partnerships/public entities/other businesses up to $6,250. At most two claims over $2,500 per calendar year.",
+   "Before suing a public entity a written claim must have been filed with it first (item 8)."
+  ],
+  "fields": {
+   "SC-100[0].Page1[0].CaptionRight[0].County[0].CourtInfo[0]": {
+    "label": "Page 1 caption box 'Superior Court of California, County of' + court name and street address (the courthouse where the claim is filed). Write e.g. 'Santa Clara\\nDowntown Superior Court, 191 N. First Street, San Jose, CA 95113'. The words 'Superior Court of California, County of' are pre-printed.",
+    "who": "filer"
+   },
+   "SC-100[0].Page1[0].CaptionRight[0].CN[0].CaseNumber[0]": {
+    "label": "Case Number \u2014 court fills in when filed. Leave blank.",
+    "who": "clerk"
+   },
+   "SC-100[0].Page1[0].CaptionRight[0].CN[0].CaseName[0]": {
+    "label": "Case Name (e.g. 'Plaintiff Name v. Defendant Name'). Fill only if the facts/instructions give or ask for a case name; otherwise leave blank.",
+    "who": "optional",
+    "conditional": true
+   },
+   "SC-100[0].Page1[0].Order[0].List1[0].LI1[0].TrialDate1[0]": {
+    "label": "Order to Go to Court \u2014 trial 1 date (clerk only)",
+    "who": "clerk"
+   },
+   "SC-100[0].Page1[0].Order[0].List1[0].LI1[0].TrialTime1[0]": {
+    "label": "Order to Go to Court \u2014 trial 1 time (clerk only)",
+    "who": "clerk"
+   },
+   "SC-100[0].Page1[0].Order[0].List1[0].LI1[0].TrialDepartment1[0]": {
+    "label": "Order to Go to Court \u2014 trial 1 department (clerk only)",
+    "who": "clerk"
+   },
+   "SC-100[0].Page1[0].Order[0].List1[0].LI1[0].TrialDateCourtAdd1[0]": {
+    "label": "Order to Go to Court \u2014 trial 1 court name/address if different (clerk only)",
+    "who": "clerk"
+   },
+   "SC-100[0].Page1[0].Order[0].List1[0].LI2[0].TrialDate2[0]": {
+    "label": "Order to Go to Court \u2014 trial 2 date (clerk only)",
+    "who": "clerk"
+   },
+   "SC-100[0].Page1[0].Order[0].List1[0].LI2[0].TrialTime2[0]": {
+    "label": "Order to Go to Court \u2014 trial 2 time (clerk only)",
+    "who": "clerk"
+   },
+   "SC-100[0].Page1[0].Order[0].List1[0].LI2[0].TrialDepartment2[0]": {
+    "label": "Order to Go to Court \u2014 trial 2 department (clerk only)",
+    "who": "clerk"
+   },
+   "SC-100[0].Page1[0].Order[0].List1[0].LI2[0].TrialDateCourtAdd2[0]": {
+    "label": "Order to Go to Court \u2014 trial 2 court name/address if different (clerk only)",
+    "who": "clerk"
+   },
+   "SC-100[0].Page1[0].Order[0].List1[0].LI3[0].TrialDate3[0]": {
+    "label": "Order to Go to Court \u2014 trial 3 date (clerk only)",
+    "who": "clerk"
+   },
+   "SC-100[0].Page1[0].Order[0].List1[0].LI3[0].TrialTIme3[0]": {
+    "label": "Order to Go to Court \u2014 trial 3 time (clerk only)",
+    "who": "clerk"
+   },
+   "SC-100[0].Page1[0].Order[0].List1[0].LI3[0].TrialDepartment3[0]": {
+    "label": "Order to Go to Court \u2014 trial 3 department (clerk only)",
+    "who": "clerk"
+   },
+   "SC-100[0].Page1[0].Order[0].List1[0].LI3[0].TrialDateCourtAdd3[0]": {
+    "label": "Order to Go to Court \u2014 trial 3 court name/address if different (clerk only)",
+    "who": "clerk"
+   },
+   "SC-100[0].Page1[0].Order[0].List1[0].LI3[0].TrialDateClerkSignDate[0]": {
+    "label": "Order \u2014 date the clerk signs (clerk only)",
+    "who": "clerk"
+   },
+   "SC-100[0].Page1[0].Order[0].List1[0].LI3[0].TrialDateClerkSign[0]": {
+    "label": "Order \u2014 'Clerk, by ___, Deputy' (clerk only)",
+    "who": "clerk"
+   },
+   "SC-100[0].Page2[0].PxCaption[0].Plaintiff[0]": {
+    "label": "Page 2 header 'Plaintiff (list names):' \u2014 every plaintiff's name, same text on pages 2, 3 and 4",
+    "who": "filer"
+   },
+   "SC-100[0].Page2[0].PxCaption[0].CaseNumber[0]": {
+    "label": "Page 2 header Case Number \u2014 court fills in. Leave blank.",
+    "who": "clerk"
+   },
+   "SC-100[0].Page3[0].PxCaption[0].Plaintiff[0]": {
+    "label": "Page 3 header 'Plaintiff (list names):' \u2014 every plaintiff's name, same text on pages 2, 3 and 4",
+    "who": "filer"
+   },
+   "SC-100[0].Page3[0].PxCaption[0].CaseNumber[0]": {
+    "label": "Page 3 header Case Number \u2014 court fills in. Leave blank.",
+    "who": "clerk"
+   },
+   "SC-100[0].Page4[0].PxCaption[0].Plaintiff[0]": {
+    "label": "Page 4 header 'Plaintiff (list names):' \u2014 every plaintiff's name, same text on pages 2, 3 and 4",
+    "who": "filer"
+   },
+   "SC-100[0].Page4[0].PxCaption[0].CaseNumber[0]": {
+    "label": "Page 4 header Case Number \u2014 court fills in. Leave blank.",
+    "who": "clerk"
+   },
+   "SC-100[0].Page2[0].List1[0].Item1[0].PlaintiffName1[0]": {
+    "label": "Item 1 plaintiff \u2014 Name (person, business, or public entity suing)",
+    "who": "filer"
+   },
+   "SC-100[0].Page2[0].List1[0].Item1[0].PlaintiffPhone1[0]": {
+    "label": "Item 1 plaintiff \u2014 Phone",
+    "who": "filer"
+   },
+   "SC-100[0].Page2[0].List1[0].Item1[0].PlaintiffAddress1[0]": {
+    "label": "Item 1 plaintiff \u2014 Street address: street only (number + street + unit)",
+    "who": "filer"
+   },
+   "SC-100[0].Page2[0].List1[0].Item1[0].PlaintiffCity1[0]": {
+    "label": "Item 1 plaintiff \u2014 Street address: City",
+    "who": "filer"
+   },
+   "SC-100[0].Page2[0].List1[0].Item1[0].PlaintiffState1[0]": {
+    "label": "Item 1 plaintiff \u2014 Street address: State (2-letter, e.g. CA)",
+    "who": "filer"
+   },
+   "SC-100[0].Page2[0].List1[0].Item1[0].PlaintiffZip1[0]": {
+    "label": "Item 1 plaintiff \u2014 Street address: Zip",
+    "who": "filer"
+   },
+   "SC-100[0].Page2[0].List1[0].Item1[0].PlaintiffMailingAddress1[0]": {
+    "label": "Item 1 plaintiff \u2014 Mailing address street \u2014 ONLY if different from street address, else blank",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List1[0].Item1[0].PlaintiffMailingCity1[0]": {
+    "label": "Item 1 plaintiff \u2014 Mailing address City (only if different)",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List1[0].Item1[0].PlaintiffMailingState1[0]": {
+    "label": "Item 1 plaintiff \u2014 Mailing address State (only if different)",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List1[0].Item1[0].PlaintiffMailingZip1[0]": {
+    "label": "Item 1 plaintiff \u2014 Mailing address Zip (only if different)",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List1[0].Item1[0].EmailAdd1[0]": {
+    "label": "Item 1 plaintiff \u2014 Email address (if available)",
+    "who": "filer"
+   },
+   "SC-100[0].Page2[0].List1[0].Item1[0].PlaintiffName2[0]": {
+    "label": "Item 1 second plaintiff (only if there is one) \u2014 Name (person, business, or public entity suing)",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List1[0].Item1[0].PlaintiffPhone2[0]": {
+    "label": "Item 1 second plaintiff (only if there is one) \u2014 Phone",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List1[0].Item1[0].PlaintiffAddress2[0]": {
+    "label": "Item 1 second plaintiff (only if there is one) \u2014 Street address: street only (number + street + unit)",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List1[0].Item1[0].PlaintiffCity2[0]": {
+    "label": "Item 1 second plaintiff (only if there is one) \u2014 Street address: City",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List1[0].Item1[0].PlaintiffState2[0]": {
+    "label": "Item 1 second plaintiff (only if there is one) \u2014 Street address: State (2-letter, e.g. CA)",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List1[0].Item1[0].PlaintiffZip2[0]": {
+    "label": "Item 1 second plaintiff (only if there is one) \u2014 Street address: Zip",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List1[0].Item1[0].PlaintiffMailingAddress2[0]": {
+    "label": "Item 1 second plaintiff (only if there is one) \u2014 Mailing address street \u2014 ONLY if different from street address, else blank",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List1[0].Item1[0].PlaintiffMailingCity2[0]": {
+    "label": "Item 1 second plaintiff (only if there is one) \u2014 Mailing address City (only if different)",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List1[0].Item1[0].PlaintiffMailingState2[0]": {
+    "label": "Item 1 second plaintiff (only if there is one) \u2014 Mailing address State (only if different)",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List1[0].Item1[0].PlaintiffMailingZip2[0]": {
+    "label": "Item 1 second plaintiff (only if there is one) \u2014 Mailing address Zip (only if different)",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List1[0].Item1[0].EmailAdd2[0]": {
+    "label": "Item 1 second plaintiff (only if there is one) \u2014 Email address (if available)",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List1[0].Item1[0].Checkbox1[0]": {
+    "label": "Item 1 checkbox: more than two plaintiffs (attach SC-100A)",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List1[0].Item1[0].Checkbox2[0]": {
+    "label": "Item 1 checkbox: a plaintiff is doing business under a fictitious name (attach SC-103)",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List1[0].Item1[0].Checkbox3[0]": {
+    "label": "Item 1 checkbox: a plaintiff is a 'licensee' or 'deferred deposit originator' (payday lender), Fin. Code 23000 et seq.",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List2[0].item2[0].DefendantName1[0]": {
+    "label": "Item 2 defendant \u2014 Name (person, business, or public entity being sued)",
+    "who": "filer"
+   },
+   "SC-100[0].Page2[0].List2[0].item2[0].DefendantPhone1[0]": {
+    "label": "Item 2 defendant \u2014 Phone",
+    "who": "filer"
+   },
+   "SC-100[0].Page2[0].List2[0].item2[0].DefendantAddress1[0]": {
+    "label": "Item 2 defendant \u2014 Street address: street only",
+    "who": "filer"
+   },
+   "SC-100[0].Page2[0].List2[0].item2[0].DefendantCity1[0]": {
+    "label": "Item 2 defendant \u2014 Street address: City",
+    "who": "filer"
+   },
+   "SC-100[0].Page2[0].List2[0].item2[0].DefendantState1[0]": {
+    "label": "Item 2 defendant \u2014 Street address: State",
+    "who": "filer"
+   },
+   "SC-100[0].Page2[0].List2[0].item2[0].DefendantZip1[0]": {
+    "label": "Item 2 defendant \u2014 Street address: Zip",
+    "who": "filer"
+   },
+   "SC-100[0].Page2[0].List2[0].item2[0].DefendantMailingAddress1[0]": {
+    "label": "Item 2 defendant \u2014 Mailing address street (only if different)",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List2[0].item2[0].DefendantMailingCity1[0]": {
+    "label": "Item 2 defendant \u2014 Mailing City (only if different)",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List2[0].item2[0].DefendantMailingState1[0]": {
+    "label": "Item 2 defendant \u2014 Mailing State (only if different)",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List2[0].item2[0].DefendantMailingZip1[0]": {
+    "label": "Item 2 defendant \u2014 Mailing Zip (only if different)",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List2[0].item2[0].DefendantName2[0]": {
+    "label": "Item 2 \u2014 if defendant is a corporation, LLC, or public entity: name of person/agent authorized for service of process. Blank for an individual defendant.",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List2[0].item2[0].DefendantJob1[0]": {
+    "label": "Item 2 \u2014 agent for service: Job title, if known",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List2[0].item2[0].DefendantAddress2[0]": {
+    "label": "Item 2 \u2014 agent for service: Address street",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List2[0].item2[0].DefendantCity2[0]": {
+    "label": "Item 2 \u2014 agent for service: City",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List2[0].item2[0].DefendantState2[0]": {
+    "label": "Item 2 \u2014 agent for service: State",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List2[0].item2[0].DefendantZip2[0]": {
+    "label": "Item 2 \u2014 agent for service: Zip",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List2[0].item2[0].Checkbox4[0]": {
+    "label": "Item 2 checkbox: case is against more than one defendant (attach SC-100A)",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List2[0].item2[0].Checkbox5[0]": {
+    "label": "Item 2 checkbox: a defendant is on active military duty (this revision has no separate name field)",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page2[0].List3[0].PlaintiffClaimAmount1[0]": {
+    "label": "Item 3 \u2014 amount the defendant owes. '$' is pre-printed: write the figure without '$', as the facts state it (e.g. 1500 or 1,500.00)",
+    "who": "filer"
+   },
+   "SC-100[0].Page2[0].List3[0].Lia[0].FillField2[0]": {
+    "label": "Item 3a \u2014 Why does the defendant owe the plaintiff money? (multi-line narrative)",
+    "who": "filer"
+   },
+   "SC-100[0].Page3[0].List3[0].Lib[0].Date1[0]": {
+    "label": "Item 3b \u2014 When did this happen? (Date) \u2014 single date",
+    "who": "filer"
+   },
+   "SC-100[0].Page3[0].List3[0].Lib[0].Date2[0]": {
+    "label": "Item 3b \u2014 if no specific date: time period 'Date started'",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page3[0].List3[0].Lib[0].Date3[0]": {
+    "label": "Item 3b \u2014 if no specific date: time period 'Through'",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page3[0].List3[0].Lic[0].FillField1[0]": {
+    "label": "Item 3c \u2014 How did you calculate the money owed? (exclude court costs and service fees)",
+    "who": "filer"
+   },
+   "SC-100[0].Page3[0].List3[0].Checkbox1[0]": {
+    "label": "Item 3 checkbox: need more space \u2014 attach a sheet or MC-031 titled 'SC-100, Item 3'",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page3[0].List4[0].Item4[0].Checkbox50[0]": {
+    "label": "Item 4 \u2014 asked the defendant to pay (or return property) before suing: YES",
+    "who": "filer"
+   },
+   "SC-100[0].Page3[0].List4[0].Item4[0].Checkbox50[1]": {
+    "label": "Item 4 \u2014 asked the defendant to pay before suing: NO",
+    "who": "filer"
+   },
+   "SC-100[0].Page3[0].List4[0].Item4[0].FillField2[0]": {
+    "label": "Item 4 \u2014 If no, explain why not (blank when Yes)",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page3[0].List5[0].Lia[0].Checkbox5cb[0]": {
+    "label": "Item 5a \u2014 venue: (1) where defendant lives or does business, (2) where plaintiff's property was damaged, (3) where plaintiff was injured, or (4) where a contract was made/signed/performed/broken by defendant or where defendant lived/did business when contract was made",
+    "who": "filer"
+   },
+   "SC-100[0].Page3[0].List5[0].Lib[0].Checkbox5cb[0]": {
+    "label": "Item 5b \u2014 venue: where buyer/lessee signed, lives now, or lived when contract was made \u2014 claim about an offer or contract for personal, family, or household goods, services, or loans (CCP 395(b))",
+    "who": "filer"
+   },
+   "SC-100[0].Page3[0].List5[0].Lic[0].Checkbox5cb[0]": {
+    "label": "Item 5c \u2014 venue: where buyer signed/lives/lived \u2014 retail installment contract like a credit card (Civ. Code 1812.10)",
+    "who": "filer"
+   },
+   "SC-100[0].Page3[0].List5[0].Lid[0].Checkbox5cb[0]": {
+    "label": "Item 5d \u2014 venue: where buyer signed/lives/lived or vehicle permanently garaged \u2014 vehicle finance sale (Civ. Code 2984.4)",
+    "who": "filer"
+   },
+   "SC-100[0].Page3[0].List5[0].Lie[0].Checkbox5cb[0]": {
+    "label": "Item 5e \u2014 venue: Other (specify in the field below)",
+    "who": "filer"
+   },
+   "SC-100[0].Page3[0].List5[0].Lie[0].FillField55[0]": {
+    "label": "Item 5e \u2014 Other (specify) text; blank unless 5e checked",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page3[0].List6[0].item6[0].ZipCode1[0]": {
+    "label": "Item 6 \u2014 zip code of the place checked in item 5 (e.g. defendant's business zip for 5a(1))",
+    "who": "filer"
+   },
+   "SC-100[0].Page3[0].List7[0].item7[0].Checkbox60[0]": {
+    "label": "Item 7 \u2014 claim is about an attorney-client fee dispute: YES",
+    "who": "filer"
+   },
+   "SC-100[0].Page3[0].List7[0].item7[0].Checkbox60[1]": {
+    "label": "Item 7 \u2014 attorney-client fee dispute: NO",
+    "who": "filer"
+   },
+   "SC-100[0].Page3[0].List7[0].item7[0].Checkbox11[0]": {
+    "label": "Item 7 \u2014 if yes and arbitration was had: SC-101 attached (check only then)",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page3[0].List8[0].item8[0].Checkbox61[0]": {
+    "label": "Item 8 \u2014 suing a public entity: YES",
+    "who": "filer"
+   },
+   "SC-100[0].Page3[0].List8[0].item8[0].Checkbox61[1]": {
+    "label": "Item 8 \u2014 suing a public entity: NO",
+    "who": "filer"
+   },
+   "SC-100[0].Page3[0].List8[0].item8[0].Checkbox14[0]": {
+    "label": "Item 8 \u2014 if yes: a written claim was filed with the entity (check)",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page3[0].List8[0].item8[0].Date4[0]": {
+    "label": "Item 8 \u2014 date the claim was filed with the public entity",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page4[0].List9[0].Item9[0].Checkbox62[0]": {
+    "label": "Item 9 \u2014 filed more than 12 other small claims in California in the last 12 months: YES",
+    "who": "filer"
+   },
+   "SC-100[0].Page4[0].List9[0].Item9[0].Checkbox62[1]": {
+    "label": "Item 9 \u2014 more than 12 other small claims in last 12 months: NO",
+    "who": "filer"
+   },
+   "SC-100[0].Page4[0].List10[0].li10[0].Checkbox63[0]": {
+    "label": "Item 10 \u2014 claim is for more than $2,500: YES",
+    "who": "filer"
+   },
+   "SC-100[0].Page4[0].List10[0].li10[0].Checkbox63[1]": {
+    "label": "Item 10 \u2014 claim is for more than $2,500: NO",
+    "who": "filer"
+   },
+   "SC-100[0].Page4[0].Sign[0].Date1[0]": {
+    "label": "Declaration \u2014 Date (plaintiff signing date)",
+    "who": "filer"
+   },
+   "SC-100[0].Page4[0].Sign[0].PlaintiffName1[0]": {
+    "label": "Declaration \u2014 'Plaintiff types or prints name here' (signature itself is wet/e-signed; there is no signature field)",
+    "who": "filer"
+   },
+   "SC-100[0].Page4[0].Sign[0].Date2[0]": {
+    "label": "Declaration \u2014 Date for second plaintiff (only if there is one)",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page4[0].Sign[0].PlaintiffName2[0]": {
+    "label": "Declaration \u2014 second plaintiff types or prints name (only if there is one)",
+    "who": "filer",
+    "conditional": true
+   },
+   "SC-100[0].Page5[0].subRIght[0].NeedHelp[0].FillField1[0]": {
+    "label": "Page 5 'Need help?' box \u2014 local Small Claims Advisor info supplied by the court. Leave blank.",
+    "who": "court"
+   },
+   "SC-100[0].Page6[0].subRight[0].NeedHelpSpanish[0].FillField2[0]": {
+    "label": "Page 6 Spanish 'Need help?' box \u2014 court-supplied advisor info. Leave blank.",
+    "who": "court"
+   },
+   "SC-100[0].#pageSet[0].MPLast[0].Print[0]": {
+    "label": "Print button \u2014 not a data field. Never set.",
+    "who": "never"
+   },
+   "SC-100[0].#pageSet[0].MPLast[0].Save[0]": {
+    "label": "Save button \u2014 not a data field. Never set.",
+    "who": "never"
+   },
+   "SC-100[0].#pageSet[0].MPLast[0].Reset[0]": {
+    "label": "Reset button \u2014 not a data field. Never set.",
+    "who": "never"
+   }
+  },
+  "rules": [
+   {
+    "type": "exclusive",
+    "name": "Item 4 Yes/No",
+    "fields": [
+     "SC-100[0].Page3[0].List4[0].Item4[0].Checkbox50[0]",
+     "SC-100[0].Page3[0].List4[0].Item4[0].Checkbox50[1]"
+    ],
+    "require_one": true
+   },
+   {
+    "type": "exclusive",
+    "name": "Item 5 venue a-e",
+    "fields": [
+     "SC-100[0].Page3[0].List5[0].Lia[0].Checkbox5cb[0]",
+     "SC-100[0].Page3[0].List5[0].Lib[0].Checkbox5cb[0]",
+     "SC-100[0].Page3[0].List5[0].Lic[0].Checkbox5cb[0]",
+     "SC-100[0].Page3[0].List5[0].Lid[0].Checkbox5cb[0]",
+     "SC-100[0].Page3[0].List5[0].Lie[0].Checkbox5cb[0]"
+    ],
+    "require_one": true
+   },
+   {
+    "type": "exclusive",
+    "name": "Item 7 Yes/No",
+    "fields": [
+     "SC-100[0].Page3[0].List7[0].item7[0].Checkbox60[0]",
+     "SC-100[0].Page3[0].List7[0].item7[0].Checkbox60[1]"
+    ],
+    "require_one": true
+   },
+   {
+    "type": "exclusive",
+    "name": "Item 8 Yes/No",
+    "fields": [
+     "SC-100[0].Page3[0].List8[0].item8[0].Checkbox61[0]",
+     "SC-100[0].Page3[0].List8[0].item8[0].Checkbox61[1]"
+    ],
+    "require_one": true
+   },
+   {
+    "type": "exclusive",
+    "name": "Item 9 Yes/No",
+    "fields": [
+     "SC-100[0].Page4[0].List9[0].Item9[0].Checkbox62[0]",
+     "SC-100[0].Page4[0].List9[0].Item9[0].Checkbox62[1]"
+    ],
+    "require_one": true
+   },
+   {
+    "type": "exclusive",
+    "name": "Item 10 Yes/No",
+    "fields": [
+     "SC-100[0].Page4[0].List10[0].li10[0].Checkbox63[0]",
+     "SC-100[0].Page4[0].List10[0].li10[0].Checkbox63[1]"
+    ],
+    "require_one": true
+   },
+   {
+    "type": "same_value",
+    "name": "Plaintiff names header on pages 2-4",
+    "fields": [
+     "SC-100[0].Page2[0].PxCaption[0].Plaintiff[0]",
+     "SC-100[0].Page3[0].PxCaption[0].Plaintiff[0]",
+     "SC-100[0].Page4[0].PxCaption[0].Plaintiff[0]"
+    ]
+   },
+   {
+    "type": "currency",
+    "name": "Item 3 amount",
+    "field": "SC-100[0].Page2[0].List3[0].PlaintiffClaimAmount1[0]"
+   },
+   {
+    "type": "amount_threshold",
+    "name": "Item 10 follows item 3 amount",
+    "amount_field": "SC-100[0].Page2[0].List3[0].PlaintiffClaimAmount1[0]",
+    "threshold": 2500,
+    "above": "SC-100[0].Page4[0].List10[0].li10[0].Checkbox63[0]",
+    "at_or_below": "SC-100[0].Page4[0].List10[0].li10[0].Checkbox63[1]"
+   },
+   {
+    "type": "amount_limit",
+    "name": "Small claims limit",
+    "amount_field": "SC-100[0].Page2[0].List3[0].PlaintiffClaimAmount1[0]",
+    "limit": 12500,
+    "business_limit": 6250
+   },
+   {
+    "type": "requires",
+    "name": "Item 4 No needs an explanation",
+    "if_set": "SC-100[0].Page3[0].List4[0].Item4[0].Checkbox50[1]",
+    "then": [
+     "SC-100[0].Page3[0].List4[0].Item4[0].FillField2[0]"
+    ]
+   },
+   {
+    "type": "forbids",
+    "name": "Item 4 Yes takes no explanation",
+    "if_set": "SC-100[0].Page3[0].List4[0].Item4[0].Checkbox50[0]",
+    "then": [
+     "SC-100[0].Page3[0].List4[0].Item4[0].FillField2[0]"
+    ]
+   },
+   {
+    "type": "requires",
+    "name": "Item 5e Other needs text",
+    "if_set": "SC-100[0].Page3[0].List5[0].Lie[0].Checkbox5cb[0]",
+    "then": [
+     "SC-100[0].Page3[0].List5[0].Lie[0].FillField55[0]"
+    ]
+   },
+   {
+    "type": "requires",
+    "name": "Item 8 Yes needs claim filed + date",
+    "if_set": "SC-100[0].Page3[0].List8[0].item8[0].Checkbox61[0]",
+    "then": [
+     "SC-100[0].Page3[0].List8[0].item8[0].Checkbox14[0]",
+     "SC-100[0].Page3[0].List8[0].item8[0].Date4[0]"
+    ]
+   },
+   {
+    "type": "forbids",
+    "name": "Item 8 No takes no claim date",
+    "if_set": "SC-100[0].Page3[0].List8[0].item8[0].Checkbox61[1]",
+    "then": [
+     "SC-100[0].Page3[0].List8[0].item8[0].Checkbox14[0]",
+     "SC-100[0].Page3[0].List8[0].item8[0].Date4[0]"
+    ]
+   },
+   {
+    "type": "forbids",
+    "name": "Item 7 No: no SC-101 checkbox",
+    "if_set": "SC-100[0].Page3[0].List7[0].item7[0].Checkbox60[1]",
+    "then": [
+     "SC-100[0].Page3[0].List7[0].item7[0].Checkbox11[0]"
+    ]
+   },
+   {
+    "type": "requires",
+    "name": "Second plaintiff signs too",
+    "if_set": "SC-100[0].Page2[0].List1[0].Item1[0].PlaintiffName2[0]",
+    "then": [
+     "SC-100[0].Page4[0].Sign[0].PlaintiffName2[0]",
+     "SC-100[0].Page4[0].Sign[0].Date2[0]"
+    ]
+   },
+   {
+    "type": "requires_always",
+    "name": "Core filer fields",
+    "fields": [
+     "SC-100[0].Page1[0].CaptionRight[0].County[0].CourtInfo[0]",
+     "SC-100[0].Page2[0].PxCaption[0].Plaintiff[0]",
+     "SC-100[0].Page2[0].List1[0].Item1[0].PlaintiffName1[0]",
+     "SC-100[0].Page2[0].List1[0].Item1[0].PlaintiffAddress1[0]",
+     "SC-100[0].Page2[0].List2[0].item2[0].DefendantName1[0]",
+     "SC-100[0].Page2[0].List3[0].PlaintiffClaimAmount1[0]",
+     "SC-100[0].Page2[0].List3[0].Lia[0].FillField2[0]",
+     "SC-100[0].Page3[0].List3[0].Lic[0].FillField1[0]",
+     "SC-100[0].Page4[0].Sign[0].Date1[0]",
+     "SC-100[0].Page4[0].Sign[0].PlaintiffName1[0]"
+    ]
+   },
+   {
+    "type": "requires_one_of",
+    "name": "Item 3b date or period",
+    "fields": [
+     "SC-100[0].Page3[0].List3[0].Lib[0].Date1[0]",
+     "SC-100[0].Page3[0].List3[0].Lib[0].Date2[0]"
+    ]
+   }
+  ]
+ }
+}

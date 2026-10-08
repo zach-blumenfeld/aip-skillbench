@@ -1,0 +1,22 @@
+{
+  "question": "<the question verbatim>",
+  "target_product": "<ProductName>",
+  "answer_type": "employee_ids | urls | doc_ids | text",
+  "answer": ["<value>", "..."],
+  "report_doc_id": "<only for document_people: selected doc_id>",
+  "author_employee_ids": ["<only for document_people>"],
+  "key_reviewer_employee_ids": ["<only for document_people>"],
+  "all_employee_ids_union": ["<only for document_people: authors first, then reviewers>"],
+  "evidence": [
+    {
+      "value": "<one answer value>",
+      "role": "author | key_reviewer | insight_provider | url_sharer | ...",
+      "artifact_type": "document | slack_message | meeting_transcript | meeting_chat | pr | url",
+      "artifact_id": "<doc id / slack message id / meeting id / pr id / url id exactly as in the data>",
+      "snippet": "<short quote that supports the mapping>",
+      "sharer_employee_id": "<optional: eid of who posted it, for link/URL answers>"
+    }
+  ],
+  "recommendation": "USE_EVIDENCE | NEED_MORE_SEARCH | AMBIGUOUS",
+  "notes": "<optional: grounding decisions, rejected distractors, ambiguities>"
+}

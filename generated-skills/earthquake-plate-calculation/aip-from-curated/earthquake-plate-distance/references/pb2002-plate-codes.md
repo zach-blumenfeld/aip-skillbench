@@ -1,37 +1,31 @@
-# PB2002 plate codes (Bird 2003)
+# PB2002 plate codes (Bird, 2003)
 
-Two-letter `Code` values used in `PB2002_plates.json` (property `Code`) and
-in `PB2002_boundaries.json` (properties `PlateA`, `PlateB`). The matching
-long name lives under `PlateName` in the plates file.
+The plates file's own `Code` / `PlateName` are authoritative; this table only helps map a
+name or alias in a request to a code. Boundary `Name` values join two codes with a
+separator ("PA-NA"; occasionally "\\" or "/"), and `PlateA`/`PlateB` hold the two codes.
 
-Major plates most tasks ask about:
+| Code | Plate | Code | Plate | Code | Plate |
+|---|---|---|---|---|---|
+| AF | Africa | EU | Eurasia | NZ | Nazca |
+| AM | Amur | FT | Futuna | OK | Okhotsk |
+| AN | Antarctica | GP | Galapagos | ON | Okinawa |
+| AP | Altiplano | IN | India | PA | Pacific |
+| AR | Arabia | JF | Juan de Fuca | PM | Panama |
+| AS | Aegean Sea | JZ | Juan Fernandez | PS | Philippine Sea |
+| AT | Anatolia | KE | Kermadec | RI | Rivera |
+| AU | Australia | MA | Mariana | SA | South America |
+| BH | Birds Head | MN | Manus | SB | South Bismarck |
+| BR | Balmoral Reef | MO | Maoke | SC | Scotia |
+| BS | Banda Sea | MS | Molucca Sea | SL | Shetland |
+| BU | Burma | NA | North America | SO | Somalia |
+| CA | Caribbean | NB | North Bismarck | SS | Solomon Sea |
+| CL | Caroline | ND | North Andes | SU | Sunda |
+| CO | Cocos | NH | New Hebrides | SW | Sandwich |
+| CR | Conway Reef | NI | Niuafo'ou | TI | Timor |
+| EA | Easter | | | TO | Tonga |
+| | | | | WL | Woodlark |
+| | | | | YA | Yangtze |
 
-| Code | PlateName       |
-|------|-----------------|
-| PA   | Pacific         |
-| NA   | North America   |
-| SA   | South America   |
-| EU   | Eurasia         |
-| AF   | Africa          |
-| AN   | Antarctica      |
-| AU   | Australia       |
-| IN   | India           |
-| NZ   | Nazca           |
-| CO   | Cocos           |
-| CA   | Caribbean       |
-| AR   | Arabia          |
-| PH   | Philippine Sea  |
-| JF   | Juan de Fuca    |
-| SO   | Somalia         |
-| SC   | Scotia          |
-
-The file carries 54 plates in total. If the user names a smaller plate
-not listed above, open `PB2002_plates.json` and grep its `features[*].properties`
-for a `PlateName` match — the `Code` beside it is the key.
-
-## Boundary filtering convention
-
-A plate's boundaries are the lines with `PlateA == <Code>` OR
-`PlateB == <Code>`. Boundary segments carry both neighbors in their
-`Name` property as `AA-BB`, so a text match on `PA` would also match
-`PAC`/`PAN`-style false positives — prefer the `PlateA`/`PlateB` fields.
+Common aliases: "Pacific Plate" = PA; "North American" = NA; "South American" = SA;
+"Indian" = IN; "Australian" = AU; "Antarctic" = AN; "African"/"Nubia" = AF;
+"Somali" = SO; "Eurasian" = EU; "Philippine" = PS; "Juan de Fuca" = JF.

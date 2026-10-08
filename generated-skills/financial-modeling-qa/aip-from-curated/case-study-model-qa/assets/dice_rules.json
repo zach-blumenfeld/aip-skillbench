@@ -1,0 +1,22 @@
+{
+  "turns_per_game": 2,
+  "rolls_per_turn": 6,
+  "die_faces": 6,
+  "categories_unique_per_game": true,
+  "categories": [
+    {"id": "high_and_often", "name": "High and Often", "rule": "max_times_count",
+     "criteria": "Any turn", "score": "highest number rolled x number of times it was rolled"},
+    {"id": "summation", "name": "Summation", "rule": "sum",
+     "criteria": "Any turn", "score": "sum of all six rolls"},
+    {"id": "highs_and_lows", "name": "Highs and Lows", "rule": "max_min_diff",
+     "criteria": "Any turn", "score": "highest x lowest x (highest - lowest)"},
+    {"id": "only_two_numbers", "name": "Only two numbers", "rule": "only_two_numbers", "points": 30,
+     "single_value_counts": false,
+     "criteria": "The six rolls are all one of two numbers (e.g. 3-6-3-6-6-6)"},
+    {"id": "all_the_numbers", "name": "All the numbers", "rule": "all_faces", "points": 40,
+     "criteria": "The rolls are (in any order) 1-2-3-4-5-6"},
+    {"id": "ordered_subset_of_four", "name": "Ordered subset of four", "rule": "ordered_run", "points": 50,
+     "run_length": 4,
+     "criteria": "In roll order, 4 adjacent rolls that step by +1 each (1-2-3-4) or by -1 each (5-4-3-2)"}
+  ]
+}

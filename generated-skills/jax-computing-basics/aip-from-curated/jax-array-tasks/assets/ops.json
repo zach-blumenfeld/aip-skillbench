@@ -1,0 +1,33 @@
+{
+  "ops": {
+    "reduce": "jnp.<func>(array, axis=axis) on one array. params: key (npz key or null), func, axis (int or null = all elements).",
+    "map": "Elementwise <func> applied with jax.vmap over the leading axis (shape preserved). params: key, func.",
+    "logistic_grad": "jax.grad of mean(logaddexp(0, -y * (x @ w))) with respect to w, evaluated at the w from the file. params: x_key, y_key, w_key, labels ('pm1' or '01' -> mapped to 2y-1).",
+    "rnn_scan": "jax.lax.scan of h_t = tanh(Wx @ x_t + Wh @ h_{t-1} + b) over the leading (time) axis of seq; returns every h_t stacked (T, H). params: seq_key, Wx_key, Wh_key, b_key, h0_key (null = zeros(H)), wx_side ('left' = Wx @ x, 'right' = x @ Wx), wh_side ('left' = Wh @ h, 'right' = h @ Wh), activation.",
+    "mlp_forward": "jax.jit-compiled forward pass: h = act(x @ W1 + b1); out = h @ W2 + b2 (activation on hidden layers only, final layer linear). params: x_key, layers ([[W_key, b_key], ...] in order), activation, w_side ('right' = x @ W, 'left' = x @ W.T)."
+  },
+  "map_funcs": {
+    "square": ["square", "squared", "x^2", "x**2"],
+    "abs": ["absolute", "abs"],
+    "exp": ["exponential", "exp"],
+    "log": ["logarithm", "log"],
+    "sqrt": ["square root", "sqrt"],
+    "tanh": ["tanh"],
+    "relu": ["relu"],
+    "sigmoid": ["sigmoid", "logistic function"],
+    "negative": ["negate", "negative"],
+    "sin": ["sine", "sin"],
+    "cos": ["cosine", "cos"]
+  },
+  "reduce_funcs": {
+    "mean": ["mean", "average", "avg"],
+    "sum": ["sum", "total"],
+    "max": ["maximum", "max", "largest"],
+    "min": ["minimum", "min", "smallest"],
+    "prod": ["product", "prod"],
+    "std": ["standard deviation", "std"],
+    "var": ["variance", "var"],
+    "median": ["median"]
+  },
+  "activations": ["relu", "tanh", "sigmoid", "gelu", "identity"]
+}

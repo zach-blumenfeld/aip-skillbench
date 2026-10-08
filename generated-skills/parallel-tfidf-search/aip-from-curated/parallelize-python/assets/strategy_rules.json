@@ -1,0 +1,104 @@
+{
+  "executor": {
+    "cpu_bound": {
+      "independent": "Process pool over independent iterations: multiprocessing.Pool(...).map / ProcessPoolExecutor.map (threads do not help CPU-bound Python: GIL). Large data: chunked processing with Pool.map(fn, items, chunksize=...) or explicit chunks.",
+      "mergeable_reduction": "Map-reduce with a process pool: each worker processes a chunk and returns a small partial (Counter, per-chunk lists); the parent merges partials in one linear pass.",
+      "true_shared_state": "Process pool with multiprocessing.Manager or multiprocessing.shared_memory for the shared structure; minimise synchronised writes (prefer per-worker partials merged at the end).",
+      "loop_carried": "Iteration N depends on N-1: keep the dependent chain sequential; parallelize only independent sub-work inside each iteration, or restructure the algorithm (prefix/scan, batching) first."
+    },
+    "io_bound": {
+      "independent": "Many independent requests: asyncio + aiohttp/aiofiles when available; with legacy blocking libraries use ThreadPoolExecutor(max_workers=N); mixed sync/async code: asyncio.to_thread(); databases: connection pooling + async drivers.",
+      "mergeable_reduction": "ThreadPoolExecutor or asyncio.gather over the I/O calls, then merge results in the parent.",
+      "true_shared_state": "Threads with a lock around the shared structure (or an asyncio.Lock); keep critical sections tiny.",
+      "loop_carried": "Sequential dependency between requests: pipeline/prefetch the next request while processing the current one; otherwise keep sequential."
+    },
+    "data_parallel": {
+      "independent": "Vectorize first: NumPy array ops / pandas built-in vectorized methods instead of Python loops; then numba (@jit(nopython=True, parallel=True) with prange) or dask for out-of-core; GPU only if available (CuPy/JAX).",
+      "mergeable_reduction": "Vectorized per-chunk reductions (np.add.reduce, groupby-agg) combined at the end; dask for data larger than memory.",
+      "true_shared_state": "NumPy array in multiprocessing.shared_memory; workers attach by name and work on disjoint slices.",
+      "loop_carried": "Use cumulative ufuncs (np.cumsum, ufunc.accumulate) or numba for the sequential recurrence."
+    },
+    "mixed": {
+      "independent": "Hybrid pipeline: CPU-heavy parts in a ProcessPoolExecutor via loop.run_in_executor, I/O parts with asyncio.gather (or a thread pool).",
+      "mergeable_reduction": "Hybrid pipeline (process pool for CPU, async/threads for I/O) with a final merge in the parent.",
+      "true_shared_state": "Separate the CPU and I/O stages with queues (producer-consumer); keep the shared state in one owner process.",
+      "loop_carried": "Overlap I/O of step N+1 with CPU of step N (producer-consumer queue); the dependent chain stays sequential."
+    }
+  },
+  "no_numeric_libs_fallback": "NumPy/pandas/numba are not importable here: do not vectorize with them; use a process pool over pure-Python chunks (stdlib multiprocessing) instead.",
+  "balancing": {
+    "uniform": "Static partitioning: equal chunks (np.array_split or items[i*n//W:(i+1)*n//W]); streaming input -> round-robin items[i::W]; large items -> size-aware partitioning.",
+    "variable_predictable": "Weighted distribution: sort items by estimated cost descending and assign each to the least-loaded worker (LPT / greedy bin packing); weight = a cheap cost proxy such as text length or row count.",
+    "variable_unpredictable": "Dynamic scheduling: many small tasks pulled by idle workers (Pool.imap/map with a modest chunksize, or submit + wait(FIRST_COMPLETED) refill loop).",
+    "long_tail": "Work stealing / dynamic scheduling with the largest items submitted first, plus time limits; split giant items into subtasks so no single task dominates."
+  },
+  "resource_constraints": {
+    "memory_bound_workers": "Memory-aware assignment: cap concurrent big items per worker; pass ids/slices, not whole objects.",
+    "heterogeneous_workers": "Capability-based routing.",
+    "network_costs": "Locality-aware placement: send work to where the data already is."
+  },
+  "shared_input": {
+    "fork": "Large read-only input (index, model, corpus): set it as a module-level global BEFORE creating a fork-context pool (multiprocessing.get_context('fork')); children inherit it copy-on-write with zero pickling. Never send it with every task.",
+    "no_fork": "No fork start method: pass the large read-only input once per worker via Pool(initializer=..., initargs=(data,)) and store it in a module global; for NumPy arrays use multiprocessing.shared_memory."
+  },
+  "memory_tactics": {
+    "always": [
+      "Send workers only what they need (e.g. (id, text) tuples, not full objects) and return compact results; pickling both ways is the main parallel overhead.",
+      "Process in chunks and discard: do not build every intermediate for the whole dataset when a streaming pass works.",
+      "Measure: tracemalloc (snapshot.statistics('lineno')) or resource.getrusage(...).ru_maxrss for peak RSS; sys.getsizeof is shallow only."
+    ],
+    "memory_goal": [
+      "Large collections of small objects: __slots__ / dataclass(slots=True) / namedtuple (roughly 40-60% less per instance).",
+      "Lists built all at once: generators (yield / yield from) and process-and-discard.",
+      "Repeated strings: sys.intern or pandas category dtype.",
+      "Numeric data in lists: NumPy arrays (8 bytes/float64); DataFrames: downcast dtypes (pd.to_numeric(downcast=...)) and sparse arrays for mostly-empty data - only when NumPy/pandas are importable.",
+      "Whole-file loads: chunked reading or mmap / np.memmap.",
+      "Intermediate copies: in-place operations and views instead of copies.",
+      "Objects never freed / unbounded caches / global accumulation / large temporaries: break circular refs with weakref, lru_cache(maxsize=...), bounded deque or periodic clear, context managers for explicit cleanup, del + gc.collect() for big temporaries; closures should capture only needed values; unregister event listeners."
+    ]
+  },
+  "exactness": [
+    "Reuse the baseline's own helper functions (import them) for tokenizing/parsing/per-item math so per-item results are identical.",
+    "Floating-point sums depend on order: accumulate in the same order as the baseline (same dict/insertion order); adding 0.0 terms the baseline adds is harmless (x + 0.0 == x).",
+    "Stable sorts keep insertion order for ties: build lists in the baseline's item order, or sort by (-score, original_position) after merging out-of-order chunks.",
+    "Reassemble parallel results in input order (map, or index by position) - never in completion order (as_completed) when order matters.",
+    "Keep the baseline's return types and container types (dict vs set vs list, dataclass fields) so equality checks pass."
+  ],
+  "pitfalls": [
+    "GIL trap: threads do not speed up CPU-bound Python; use processes.",
+    "Pickle failures: lambdas, nested functions and nested classes cannot be sent to process pools; use module-level functions.",
+    "Memory explosion: every process gets its own copy of pickled data; share big read-only data via fork/initializer/shared memory.",
+    "Async in sync: adding async to one function is not enough; the whole call chain must be restructured.",
+    "Over-parallelization: pool start-up and pickling exceed the gains for small workloads (< ~1000 cheap items); keep a sequential fast path below a size threshold.",
+    "Fix the algorithm first: an O(n*m) loop parallelized over W workers is still O(n*m)/W; a linear rewrite usually beats it.",
+    "Amdahl: the serial part (merge, final sort) bounds speedup at 1/((1-p)+p/W); measure it and keep the parent's merge linear.",
+    "Worker count above usable CPUs (cgroup quota, affinity) adds contention, not speed; bound workers explicitly.",
+    "Python 3.14+ and macOS default to spawn/forkserver: module globals are not inherited; use an explicit fork context or an initializer, and guard script entry with if __name__ == '__main__'.",
+    "Over-partitioning: too many tiny tasks cost more in IPC than they save; batch small items (aim for ~2-8 chunks per worker).",
+    "Starvation/stragglers: one huge task at the end of the queue leaves workers idle; submit largest first or split it."
+  ],
+  "verification_checklist": [
+    "Output matches the sequential version for test inputs (exactly, or within the tolerance the task states).",
+    "No race conditions: shared mutable state is absent or properly synchronized.",
+    "Exceptions in workers are caught/propagated (executor.submit for per-item error handling; return_exceptions=True for asyncio.gather).",
+    "Resources cleaned up: pools/executors used as context managers, connections released, shared memory closed and unlinked.",
+    "Worker count is bounded (default or explicit limit) and the API accepts the worker count the task specifies.",
+    "Required imports added; the module imports cleanly in a fresh interpreter.",
+    "Work distribution roughly even (load imbalance max/avg < 1.2; measure completion times).",
+    "No starvation: all workers stay busy (utilization > 90%).",
+    "Stragglers handled (max/median task time < 2.0; timeout/retry or largest-first scheduling).",
+    "Results are complete and correct (no items dropped or duplicated across chunks).",
+    "Overhead acceptable: parallel version is faster than sequential at the task's worker counts and data sizes (and not slower at 1 worker).",
+    "Memory usage measured (reduced, when memory is a goal); no new memory leaks; peak within the container's limit; performance acceptable (generators may add iteration overhead).",
+    "Code remains readable and maintainable."
+  ],
+  "targets": {
+    "load_imbalance_max": 1.2,
+    "straggler_ratio_max": 2.0,
+    "worker_utilization_min": 0.9,
+    "small_workload_items": 1000,
+    "small_workload_seconds": 0.5,
+    "chunks_per_worker": 4,
+    "max_attempts": 3
+  }
+}

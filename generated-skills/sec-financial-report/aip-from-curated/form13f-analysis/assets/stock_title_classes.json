@@ -1,0 +1,5 @@
+{
+  "_note": "TITLEOFCLASS values (compared lowercased) that count as a stock holding. 'as_shipped' is exactly what the source scripts' list evaluates to: the source omitted the commas after 'com shs', so Python fused the remaining 17 entries into one string that never matches. 'intended' is the list as written. 'as_shipped' is the default because it reproduces the source skill's numbers.",
+  "as_shipped": ["com", "common stock", "cl a", "com new", "class a", "stock", "common", "com cl a", "com shs", "sponsored adrsponsored adsadrequitycmncl bord shscl a comclass a comcap stk cl acomm stkcl b newcap stk cl ccl a newforeign stockshs cl a"],
+  "intended": ["com", "common stock", "cl a", "com new", "class a", "stock", "common", "com cl a", "com shs", "sponsored adr", "sponsored ads", "adr", "equity", "cmn", "cl b", "ord shs", "cl a com", "class a com", "cap stk cl a", "comm stk", "cl b new", "cap stk cl c", "cl a new", "foreign stock", "shs cl a"]
+}

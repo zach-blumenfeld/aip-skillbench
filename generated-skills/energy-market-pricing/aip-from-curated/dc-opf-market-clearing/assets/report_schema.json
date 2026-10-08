@@ -1,0 +1,17 @@
+{
+  "base_case": {
+    "total_cost_dollars_per_hour": 0.0,
+    "lmp_by_bus": [{"bus": 1, "lmp_dollars_per_MWh": 0.0}],
+    "reserve_mcp_dollars_per_MWh": 0.0,
+    "binding_lines": [{"from": 1, "to": 2, "flow_MW": 0.0, "limit_MW": 0.0}],
+    "totals": {"cost_dollars_per_hour": 0.0, "load_MW": 0.0, "generation_MW": 0.0, "reserve_MW": 0.0},
+    "operating_margin_MW": 0.0,
+    "generator_dispatch": [{"id": 1, "bus": 1, "output_MW": 0.0, "reserve_MW": 0.0, "pmax_MW": 0.0, "pmin_MW": 0.0}]
+  },
+  "counterfactual": "same keys as base_case (present only when a counterfactual was run)",
+  "impact_analysis": {
+    "cost_reduction_dollars_per_hour": 0.0,
+    "buses_with_largest_lmp_drop": [{"bus": 1, "base_lmp": 0.0, "cf_lmp": 0.0, "delta": 0.0}],
+    "congestion_relieved": true
+  }
+}

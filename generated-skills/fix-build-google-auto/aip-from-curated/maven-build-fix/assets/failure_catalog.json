@@ -1,0 +1,154 @@
+{
+  "max_rounds": 8,
+  "build_timeout_seconds": 3000,
+  "log_dir": "/tmp/aip-maven-build-fix",
+  "goal_phase": {
+    "enforcer:enforce": "validate",
+    "checkstyle:check": "validate",
+    "build-helper:add-source": "generate-sources",
+    "exec:exec": "generate-sources",
+    "resources:resources": "process-resources",
+    "compiler:compile": "compile",
+    "resources:testResources": "process-test-resources",
+    "compiler:testCompile": "test-compile",
+    "jacoco:prepare-agent": "initialize",
+    "surefire:test": "test",
+    "jacoco:report": "test",
+    "jar:jar": "package",
+    "jar:test-jar": "package",
+    "war:war": "package",
+    "source:jar-no-fork": "package",
+    "source:jar": "package",
+    "javadoc:jar": "package",
+    "assembly:single": "package",
+    "shade:shade": "package",
+    "spring-boot:repackage": "package",
+    "failsafe:integration-test": "integration-test",
+    "failsafe:verify": "verify",
+    "jacoco:check": "verify",
+    "spotbugs:check": "verify",
+    "pmd:check": "verify",
+    "pmd:cpd-check": "verify",
+    "gpg:sign": "verify",
+    "install:install": "install",
+    "deploy:deploy": "deploy",
+    "site:site": "site"
+  },
+  "phase_order": ["validate", "initialize", "generate-sources", "process-sources", "generate-resources", "process-resources", "compile", "process-classes", "generate-test-sources", "process-test-sources", "generate-test-resources", "process-test-resources", "test-compile", "process-test-classes", "test", "prepare-package", "package", "pre-integration-test", "integration-test", "post-integration-test", "verify", "install", "deploy"],
+  "categories": [
+    {
+      "id": "repository-https-required",
+      "patterns": ["501 HTTPS Required", "Return code is: 501", "ReasonPhrase:HTTPS Required"],
+      "layer_hint": "build-config",
+      "playbook": "Maven Central refuses plain http since 2020-01-15. Change every http:// repository/pluginRepository URL for Central (repo.maven.apache.org, repo1.maven.org, central.maven.org) to https://repo.maven.apache.org/maven2 in the POMs (and parent POMs in the reactor). If the http URL comes from an old Maven's built-in super POM (Maven < 3.2.3) or a settings.xml, add an https <repository>/<pluginRepository> with id 'central' to the root POM, which overrides the built-in one."
+    },
+    {
+      "id": "tls-handshake",
+      "patterns": ["protocol_version", "handshake_failure", "SSLHandshakeException", "PKIX path building failed", "SSLException", "Remote host closed connection during handshake"],
+      "layer_hint": "environment",
+      "playbook": "The JVM running Maven cannot negotiate TLS with the repository (JDK 7 defaults to TLSv1; Central requires TLSv1.2). Run Maven on a newer JDK (compile level is set by maven.compiler.source/target, not by the JDK running Maven), or pass -Dhttps.protocols=TLSv1.2 (persist it in .mvn/jvm.config or MAVEN_OPTS). If artifacts are already in ~/.m2, try offline mode (-o)."
+    },
+    {
+      "id": "offline-artifact-missing",
+      "patterns": ["offline mode and the artifact", "has not been downloaded from it before", "Cannot access .* in offline mode"],
+      "layer_hint": "environment",
+      "playbook": "Offline mode (-o, or <offline>true</offline> in settings.xml) and the artifact is not in ~/.m2. Drop -o if the network works; otherwise the build must use an artifact/version that is already cached: list ~/.m2/repository/<group path>/<artifact>/ and align the POM version to one that exists."
+    },
+    {
+      "id": "plugin-resolution",
+      "patterns": ["PluginResolutionException", "Plugin .* or one of its dependencies could not be resolved", "Failed to read artifact descriptor for .*plugin", "No plugin found for prefix", "PluginVersionResolutionException"],
+      "layer_hint": "build-config",
+      "playbook": "A plugin (or its version) cannot be resolved. Pin an explicit, published plugin version in <pluginManagement> of the root POM (missing versions make Maven pick one from metadata). Check the coordinates (groupId defaults to org.apache.maven.plugins only for maven-*-plugin), the pluginRepositories URL (https), and whether the version exists in ~/.m2 when offline. 'No plugin found for prefix' means the plugin is not declared or its groupId is not searchable; invoke as groupId:artifactId:version:goal or declare it."
+    },
+    {
+      "id": "dependency-resolution",
+      "patterns": ["Could not resolve dependencies", "Could not find artifact", "Failed to collect dependencies", "Non-resolvable parent POM", "Non-resolvable import POM", "Could not transfer artifact", "was cached in the local repository, resolution will not be reattempted", "Failed to read artifact descriptor", "DependencyResolutionException"],
+      "layer_hint": "build-config",
+      "playbook": "A dependency, parent POM, or BOM cannot be resolved. Find the exact coordinates in the error. Causes, in order: (1) a version that does not exist or an external -SNAPSHOT/range/LATEST that no longer resolves -> pin a published version; (2) a sibling reactor module not built yet -> build from the root with -am or install it first (reactor order); (3) repository URL http or dead -> https / correct repo; (4) 'cached in the local repository, resolution will not be reattempted' -> rerun with -U or delete that artifact's folder in ~/.m2; (5) parent POM relativePath wrong. Duplicate classes from two artifacts (NoSuchMethodError, LinkageError at test time) mean a missing exclusion. Use mvn dependency:tree -Dverbose -Dincludes=<groupId> to see who pulls it in; exclude a broken transitive with <exclusions> (comment why) or force a version in <dependencyManagement>."
+    },
+    {
+      "id": "pom-invalid",
+      "patterns": ["Non-parseable POM", "Malformed POM", "dependencies.dependency.version' for .* is missing", "Unknown packaging", "The build could not read", "Project build error", "is missing\\. @ line", "must be unique: ", "Child module .* does not exist", "ProjectBuildingException"],
+      "layer_hint": "build-config",
+      "playbook": "The POM model itself is invalid. Fix the reported line: missing dependency version (add it, or add a dependencyManagement/BOM entry), duplicate declarations (remove one; banDuplicatePomDependencyVersions), a <module> that points at a missing directory, an undefined ${property}, or XML syntax. Check the effective POM with mvn help:effective-pom once it parses."
+    },
+    {
+      "id": "reactor-order",
+      "patterns": ["The projects in the reactor contain a cyclic reference", "Could not find the selected project in the reactor", "cyclic reference"],
+      "layer_hint": "build-config",
+      "playbook": "Reactor problem: a dependency cycle between modules (break it by moving shared code into a common module) or a -pl/-rf selector that names no module (use :artifactId or the module path). Module order follows dependencies, not the <modules> list order."
+    },
+    {
+      "id": "maven-version",
+      "patterns": ["requires Maven version", "RequireMavenVersion", "Detected Maven Version: .* is not in the allowed range"],
+      "layer_hint": "environment",
+      "playbook": "The installed Maven is outside the range a plugin or the enforcer requires. Use the Maven wrapper if present (./mvnw), or pick plugin versions compatible with the installed Maven (mvn -v); widening an enforcer requireMavenVersion range is a last resort and must be justified."
+    },
+    {
+      "id": "jdk-mismatch",
+      "patterns": ["invalid target release", "invalid source release", "Unsupported major\\.minor version", "UnsupportedClassVersionError", "has been compiled by a more recent version", "release version .* not supported", "Source option .* is no longer supported", "Target option .* is no longer supported", "class file has wrong version", "error: option --release", "requireJavaVersion", "Detected JDK Version: .* is not in the allowed range", "package sun\\.misc does not exist", "package javax\\.annotation\\.processing\\.Generated", "package javax\\.xml\\.bind does not exist", "module not found"],
+      "layer_hint": "environment",
+      "playbook": "The JDK running Maven does not match the project's language level or a dependency's bytecode. Read maven.compiler.source/target/release and the original CI's jdk. Switch the JDK (in this container: source /opt/jdk_switcher/jdk_switcher.sh && jdk_switcher use openjdk8 | openjdk7 | oraclejdk8, or export JAVA_HOME=/usr/lib/jvm/<dir> and PATH=$JAVA_HOME/bin:$PATH). 'compiled by a more recent version'/'Unsupported major.minor' means a dependency or plugin needs a newer JDK than the one running: either run on a newer JDK or pin the older dependency/plugin version that matches. JDK 9+ removed javax.xml.bind/javax.annotation from the default classpath; JDK 12+ dropped source/target 6, JDK 9+ needs release instead of bootclasspath tricks."
+    },
+    {
+      "id": "annotation-processing",
+      "patterns": ["Bad service configuration file", "javax\\.annotation\\.processing\\.Processor", "error: Annotation processor", "ServiceConfigurationError", "processor .* not found", "AnnotationProcessor", "@AutoValue", "@AutoService", "@AutoFactory", "error: \\[.*\\] .*processor"],
+      "layer_hint": "main-source",
+      "playbook": "An annotation processor failed or could not load. If the project itself provides processors (e.g. google/auto value/factory/service), a processor error during the module's own compile usually means the processor code or its META-INF/services/javax.annotation.processing.Processor registration is wrong, or the processor jar is on its own compile path (-proc:none is set for processor modules in some builds). If the project consumes processors, check annotationProcessorPaths in maven-compiler-plugin and the processor's version vs the JDK. Error text with a file:line points at the generated or annotated source; read the processor message literally."
+    },
+    {
+      "id": "compilation",
+      "patterns": ["COMPILATION ERROR", "cannot find symbol", "does not override or implement", "incompatible types", "is not abstract and does not override", "cannot be applied to", "unreported exception", "package .* does not exist", "class .* is public, should be declared in a file named", "maven-compiler-plugin.*Compilation failure", "Compilation failure", "error: "],
+      "layer_hint": "main-source",
+      "playbook": "javac errors. Read the first [ERROR] /path/File.java:[line,col] message, not the cascade. cannot find symbol/package does not exist -> a missing import, a renamed API in a dependency version, a missing dependency or wrong <scope> (test-scope dep used from main code; provided not on test path), or a sibling module not rebuilt (build from root with -am). Signature mismatches after a dependency upgrade -> adapt the code to the dependency version actually resolved (mvn dependency:tree), or pin the version the code was written for. A dependency marked <optional>true</optional> (or provided/test scope) in another module is not transitive: declare it where it is used. Errors naming classes that no longer exist in source point at stale target/ output: make sure the command includes clean. testCompile failures are in src/test; compile failures in src/main. Fix the code; do not exclude the file from compilation."
+    },
+    {
+      "id": "test-fork-crash",
+      "patterns": ["The forked VM terminated without properly saying goodbye", "ExecutionException The forked VM terminated", "There was an error in the forked process", "Crashed tests:", "SurefireBooterForkException"],
+      "layer_hint": "environment",
+      "playbook": "The surefire fork JVM crashed or exited. Look at the dump files (target/surefire-reports/*.dump*). Causes: OOM in the fork (raise -Xmx in surefire <argLine>), System.exit in a test, an argLine flag the running JDK rejects (e.g. -XX:MaxPermSize removed on JDK 8+ is only a warning, but --add-opens fails on JDK 8), or an old surefire (<2.22) on a newer JDK. Pin a surefire version that supports the JDK."
+    },
+    {
+      "id": "test-failure",
+      "patterns": ["There are test failures", "There were test failures", "Tests run: .*, Failures: [1-9]", "Tests run: .*, Errors: [1-9]", "Failed tests:", "Tests in error:", "<<< FAILURE!", "<<< ERROR!"],
+      "layer_hint": "test-code",
+      "playbook": "Tests ran and failed. Open target/surefire-reports/<TestClass>.txt for each failing test and read the assertion message and stack. Decide whether the production code or the test is wrong given the commit's intent (git log -1, git show). Re-run one test fast: mvn -B test -pl :<module> -am -Dtest=<Class>#<method> -DfailIfNoTests=false (surefire 2.x) / -Dsurefire.failIfNoSpecifiedTests=false (3.x). Watch for environment-sensitive tests (locale, timezone, file ordering, JDK-specific toString/hash ordering, compiler message text that differs across JDKs). Never pass -DskipTests or -Dmaven.test.skip=true, add @Ignore, or delete a test to get green."
+    },
+    {
+      "id": "enforcer",
+      "patterns": ["maven-enforcer-plugin", "Rule .* failed with message", "Dependency convergence error", "DependencyConvergence", "RequireUpperBoundDeps", "BannedDependencies", "Found Banned Dependency"],
+      "layer_hint": "build-config",
+      "playbook": "An enforcer rule failed. dependencyConvergence/requireUpperBoundDeps: run mvn dependency:tree -Dverbose -Dincludes=<groupId>:<artifactId>, then force one version in <dependencyManagement> (nearest definition wins otherwise) or add an <exclusion>. bannedDependencies: exclude the banned artifact where it enters. requireJavaVersion/requireMavenVersion: change the JDK/Maven, not the rule."
+    },
+    {
+      "id": "javadoc",
+      "patterns": ["maven-javadoc-plugin", "javadoc: error", "doclint", "MavenReportException: Error while generating Javadoc", "Error while creating javadoc report"],
+      "layer_hint": "build-config",
+      "playbook": "Javadoc generation failed (JDK 8+ doclint is strict). Fix the reported javadoc errors in source, or configure the javadoc plugin with <doclint>none</doclint> (JDK 8+) / <additionalparam>-Xdoclint:none</additionalparam> (old plugin versions); a pinned plugin version that matches the JDK matters. -Dmaven.javadoc.skip=true is acceptable only if the original CI command used it."
+    },
+    {
+      "id": "quality-gate",
+      "patterns": ["maven-checkstyle-plugin", "You have \\d+ Checkstyle violation", "maven-pmd-plugin", "PMD Failure", "spotbugs-maven-plugin", "BugInstance", "jacoco-maven-plugin.*check", "Coverage checks have not been met", "animal-sniffer", "Undefined reference:", "license-maven-plugin", "Some files do not have the expected license header", "fmt-maven-plugin", "spotless"],
+      "layer_hint": "main-source",
+      "playbook": "A quality gate (checkstyle, PMD, SpotBugs, JaCoCo coverage, animal-sniffer API signature, license header, formatter) failed. Fix the reported violations in the code (animal-sniffer 'Undefined reference' means code uses an API newer than the target JDK signature: use an older API). Do not lower thresholds or disable the plugin unless the failure is environmental."
+    },
+    {
+      "id": "resources",
+      "patterns": ["MalformedInputException", "Input length = 1", "maven-resources-plugin", "unmappable character for encoding", "Invalid byte .* of .*-byte UTF-8 sequence"],
+      "layer_hint": "build-config",
+      "playbook": "Resource filtering or encoding failure. Binary files are being filtered (split resources: filtering=true only for *.properties/*.xml, or list nonFilteredFileExtensions), or the source/resource encoding is unset (set project.build.sourceEncoding=UTF-8; LANG=C in the container makes the platform default ASCII)."
+    },
+    {
+      "id": "out-of-memory",
+      "patterns": ["OutOfMemoryError", "Java heap space", "PermGen space", "GC overhead limit exceeded", "Metaspace", "Cannot allocate memory", "Killed"],
+      "layer_hint": "environment",
+      "playbook": "Out of memory. Raise heap for Maven (MAVEN_OPTS=-Xmx2g, persist in .mvn/jvm.config), for forked compilers (maven-compiler-plugin <fork>true</fork> with <compilerArgs><arg>-J-Xmx512m</arg></compilerArgs> / <maxmem>), or for test forks (surefire <argLine>-Xmx1024m</argLine>). Reduce parallelism (-T, surefire forkCount/parallel). PermGen on JDK 7: -XX:MaxPermSize=256m."
+    },
+    {
+      "id": "packaging",
+      "patterns": ["maven-jar-plugin", "maven-shade-plugin", "maven-assembly-plugin", "maven-war-plugin", "webxml attribute is required", "maven-source-plugin", "maven-gpg-plugin", "gpg: signing failed", "maven-install-plugin", "maven-deploy-plugin"],
+      "layer_hint": "build-config",
+      "playbook": "A packaging/installation plugin failed. war without web.xml -> <failOnMissingWebXml>false</failOnMissingWebXml>; shade -> filters for META-INF/*.SF|*.DSA|*.RSA and ServicesResourceTransformer; gpg signing should live in a release profile, not the default build; deploy needs distributionManagement + credentials and normally is not part of a CI verification build."
+    }
+  ]
+}

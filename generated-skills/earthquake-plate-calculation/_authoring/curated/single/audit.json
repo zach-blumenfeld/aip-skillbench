@@ -1,6 +1,6 @@
 {
-  "tool_calls": 52,
+  "tool_calls": 43,
   "violations": [],
   "ok": true,
-  "total_cost_usd": 3.42562125
+  "total_cost_usd": 2.1143929999999997
 }
