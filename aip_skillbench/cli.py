@@ -267,6 +267,11 @@ def eval(
         help="aip-spec / aip-runtime: write that mode's ~/.claude/CLAUDE.md memory in the sandbox. "
              "--no-aip-nudge is the ablation.",
     ),
+    agent_env: list[str] = typer.Option(
+        [], "--agent-env",
+        help="Repeatable KEY=VALUE for the solver process in the container (e.g. "
+             "MAX_THINKING_TOKENS=0 for models the bundled harness cannot send thinking params to).",
+    ),
 ) -> None:
     """Run one evaluation in one mode."""
     task_dir = _task_dir(task)
@@ -354,6 +359,10 @@ def eval(
     else:
         raise typer.BadParameter(f"unknown mode: {mode}")
 
+    for kv in agent_env:
+        if "=" not in kv:
+            raise typer.BadParameter(f"--agent-env expects KEY=VALUE, got {kv!r}")
+        extra += ["--agent-env", kv]
     raise typer.Exit(_bench(*base, *extra, env=env))
 
 
@@ -771,6 +780,9 @@ def run_matrix_cmd(
         help="aip-spec / aip-runtime: seed that mode's ~/.claude/CLAUDE.md memory in the sandbox. "
              "Config key `aip_nudge`. Default on; --no-aip-nudge is the ablation.",
     ),
+    agent_env: list[str] = typer.Option(
+        [], "--agent-env", help="Repeatable KEY=VALUE for the solver process. Config key `agent_env` (list)."
+    ),
 ) -> None:
     """Run a (task × model × mode × trial) eval matrix concurrently with live progress."""
     from aip_skillbench.run_matrix import ALL_MODES, run_matrix
@@ -801,6 +813,7 @@ def run_matrix_cmd(
         decision_model if decision_model is not None else bool(cfg.get("decision_model", False))
     )
     nudge_resolved = aip_nudge if aip_nudge is not None else bool(cfg.get("aip_nudge", True))
+    agent_env_resolved = list(agent_env) or [str(x) for x in cfg.get("agent_env", [])]
 
     rc = run_matrix(
         tasks=tasks_resolved,
@@ -816,6 +829,7 @@ def run_matrix_cmd(
         shuffle=shuffle,
         decision_model=decision_resolved,
         aip_nudge=nudge_resolved,
+        agent_env=agent_env_resolved,
     )
     raise typer.Exit(rc)
 

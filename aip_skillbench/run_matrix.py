@@ -291,6 +291,7 @@ def _run_cell(
     cell: Cell, out: Path, agent: str, sandbox: str, state: MatrixState,
     decision_model: bool = False,
     aip_nudge: bool = True,
+    agent_env: list[str] | None = None,
 ) -> CellResult:
     state.mark_running(cell)
     cell_jobs_dir = out / "cells" / cell.safe_name
@@ -313,6 +314,8 @@ def _run_cell(
         cmd.append("--decision-model")
     if not aip_nudge:
         cmd.append("--no-aip-nudge")
+    for kv in agent_env or []:
+        cmd += ["--agent-env", kv]
     started_at = datetime.now().isoformat()
     with open(log_path, "w") as logf:
         logf.write("$ " + " ".join(cmd) + "\n\n")
@@ -447,6 +450,7 @@ def run_matrix(
     shuffle: bool,
     decision_model: bool = False,
     aip_nudge: bool = True,
+    agent_env: list[str] | None = None,
 ) -> int:
     if not tasks:
         raise typer.BadParameter("no tasks specified (use --task ... or --config)")
@@ -507,6 +511,7 @@ def run_matrix(
                 "sandbox": sandbox,
                 "decision_model": decision_model,
                 "aip_nudge": aip_nudge,
+                "agent_env": agent_env or [],
                 "aip_version": aip_ref.get("aip_version"),
                 "aip_ref": aip_ref,
                 "total_cells": len(cells),
@@ -534,7 +539,7 @@ def run_matrix(
     with Live(_render(state), refresh_per_second=2, console=console) as live:
         with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as ex:
             futures = {
-                ex.submit(_run_cell, c, out, agent, sandbox, state, decision_model, aip_nudge): c
+                ex.submit(_run_cell, c, out, agent, sandbox, state, decision_model, aip_nudge, agent_env): c
                 for c in pending
             }
             try:

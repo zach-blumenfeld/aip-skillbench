@@ -32,7 +32,7 @@ tasks:
   - suricata-custom-exfil
   - travel-planning
 models:
-  - claude-haiku-4-5
+  - claude-haiku-5-5
 modes:
   - human-curated
   - aip-spec
