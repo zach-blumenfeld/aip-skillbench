@@ -203,6 +203,23 @@ Campaign (3 modes × 5 trials on Haiku, concurrency 10):
 A `human-curated` cell can run to the 1800 s agent budget; that is a benchflow timeout,
 not a harness bug.
 
+## Watching a run
+
+`run-matrix` draws its live matrix (one row per task, one glyph per trial, per-mode
+aggregates) in the terminal it runs in. It needs a TTY: under `nohup`, in the
+background, or through `tee` nothing is drawn. On a VM run it inside `tmux` so the view
+survives an SSH drop (`tmux new -s bench`, later `tmux attach -t bench`).
+
+The same view can be rebuilt from the run's files in any other terminal, during or
+after the run:
+
+```sh
+uv run aip-skillbench matrix-view --watch        # newest campaign under runs/, refreshes every 10 s
+uv run aip-skillbench matrix-view runs/<dir>     # one snapshot of a given run
+```
+
+A cell shows as running when its `cells/<cell>/` dir exists but no summary row does.
+
 ## Reading the results
 
 `runs/campaign-N-<date>/` holds:

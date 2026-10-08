@@ -572,3 +572,53 @@ def run_matrix(
         f"\nDone. pass={n_pass} fail={n_fail} error={n_err}  |  summary: {summary_path}"
     )
     return 1 if n_err else 0
+
+
+def _load_campaign_state(out: Path) -> MatrixState:
+    """Rebuild a MatrixState for an existing campaign dir from campaign.json + summary.jsonl.
+
+    A cell whose `cells/<name>/` dir exists but has no summary row is shown as running:
+    `_run_cell` creates that dir first thing and the row is written only when it ends.
+    """
+    campaign = json.loads((out / "campaign.json").read_text())
+    tasks = list(campaign["tasks"])
+    models = list(campaign["models"])
+    modes = [Mode(m) for m in campaign["modes"]]
+    trials = int(campaign["trials"])
+    cells = _build_cells(tasks, models, modes, trials)
+    state = MatrixState(
+        cells=cells, modes=modes, models=models, tasks=tasks, trials=trials,
+        summary_path=out / "summary.jsonl", csv_path=out / "summary.csv",
+        status_path=out / "status.json",
+    )
+    try:
+        state.started_at = datetime.fromisoformat(campaign["started_at"]).timestamp()
+    except (KeyError, ValueError):
+        pass
+    state.preload()
+    for c in cells:
+        if state.status[c.key] == "pending" and (out / "cells" / c.safe_name).is_dir():
+            state.status[c.key] = "running"
+    return state
+
+
+def matrix_view(out: Path, watch: bool, interval: float) -> int:
+    """Print (or keep refreshing) the run-matrix view for a campaign dir, from its files."""
+    if not (out / "campaign.json").exists():
+        typer.echo(f"not a campaign dir (no campaign.json): {out}", err=True)
+        return 2
+    from rich.console import Console
+    from rich.live import Live
+
+    console = Console()
+    if not watch:
+        console.print(_render(_load_campaign_state(out)))
+        return 0
+    with Live(_render(_load_campaign_state(out)), refresh_per_second=2, console=console) as live:
+        try:
+            while True:
+                time.sleep(interval)
+                live.update(_render(_load_campaign_state(out)))
+        except KeyboardInterrupt:
+            pass
+    return 0

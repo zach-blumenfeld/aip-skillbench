@@ -842,6 +842,27 @@ def run_matrix_cmd(
     raise typer.Exit(rc)
 
 
+@app.command("matrix-view")
+def matrix_view_cmd(
+    out: Optional[Path] = typer.Argument(
+        None, help="Campaign dir (the run-matrix --out). Default: newest dir under runs/."
+    ),
+    watch: bool = typer.Option(False, "--watch", "-w", help="Keep refreshing until Ctrl-C."),
+    interval: float = typer.Option(10.0, "--interval", help="Seconds between refreshes with --watch."),
+) -> None:
+    """Show the run-matrix progress view for a campaign, from its files (any terminal, any time)."""
+    from aip_skillbench.run_matrix import matrix_view
+
+    if out is None:
+        candidates = sorted(
+            (d for d in (ROOT / "runs").glob("*/campaign.json")), key=lambda p: p.stat().st_mtime
+        )
+        if not candidates:
+            raise typer.BadParameter("no campaign dirs under runs/")
+        out = candidates[-1].parent
+    raise typer.Exit(matrix_view(out, watch, interval))
+
+
 @app.command()
 def reward(jobs_subdir: Path) -> None:
     """Print the reward(s) under a jobs/ output directory."""
