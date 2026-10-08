@@ -72,6 +72,58 @@ task's own `task.toml`; "skills" is the number of curated skills under
 | suricata-custom-exfil | medium | 3 |
 | travel-planning | medium | 6 |
 
+## Setting up a machine (fresh VM or an existing clone)
+
+```sh
+# existing clone: get onto the branch and the vendored tasks it expects
+cd ~/aip-skillbench
+git fetch origin && git checkout aip-0.4a0 && git pull
+git submodule update --init                 # vendor/skillsbench at the pinned commit
+git clean -fdn generated-skills             # dry run: stale dirs from an older checkout
+git clean -fd generated-skills              # remove them (git keeps no empty dirs, so leftovers survive a checkout)
+
+# toolchain
+uv sync
+export PATH="$HOME/.local/bin:$PATH"        # uv tool installs land here; add to ~/.bashrc
+uv run aip-skillbench bootstrap --force     # clones aip + aip-spec over SSH (git@github.com),
+                                            # installs the aip and aip-spec CLIs, builds the wheels
+cp /path/to/.env .                          # ANTHROPIC_API_KEY (gitignored; copy it over)
+
+# check
+aip-spec --version                          # 0.5a1
+ls build/aip                                # aip_spec-*.whl and aip-*.whl
+python3 -c "import json;d=json.load(open('generated-skills/AIP_REF.json'));print(d['aip']['sha'][:7], d['aip_spec']['ref'])"
+ls -d generated-skills/*/aip-from-curated/*/ | wc -l                           # 28
+for d in generated-skills/*/aip-from-curated/*/; do aip-spec validate "$d" >/dev/null 2>&1 || echo "INVALID $d"; done
+docker info --format 'cpus={{.NCPU}} mem={{.MemTotal}}'
+```
+
+`bootstrap` clones over SSH; the machine needs a GitHub key (`ssh -T git@github.com`),
+or switch the two `*_REMOTE` constants in `aip_skillbench/_aip.py` to `https://` URLs.
+The `claude` CLI is only needed to compile packs, not to run campaigns. For a GCP VM,
+`scripts/gcp-docker-setup.md` has the Docker daemon settings that matter at
+concurrency 12 and up. Each task's first trial builds its image with the agent baked
+in (about two minutes, once); a slow network makes that and the tasks' own verifier
+downloads the bottleneck, so run campaigns where bandwidth is good.
+
+### The two-AIP-mode campaign on the 28 tasks
+
+```sh
+OUT=runs/campaign-28-aip-$(date +%F)
+caffeinate -dimsu uv run aip-skillbench run-matrix \
+  --config configs/campaign-27.yaml \
+  --mode aip-spec --mode aip-runtime \
+  --agent-env MAX_THINKING_TOKENS=0 \
+  --trials 5 --concurrency 10 \
+  --out "$OUT" --yes
+```
+
+`--agent-env MAX_THINKING_TOKENS=0` runs the solver with extended thinking off; it is
+required for Claude 5 models until `claude-agent-acp` ships an SDK that speaks their
+thinking parameter, and it is recorded in `campaign.json`. Drop `caffeinate` on Linux.
+Re-running the same command resumes; cells that errored are treated as done, so after
+a bad run use a new `--out` or delete the directory.
+
 ## Running a campaign
 
 Prerequisites: `uv sync`, `.env` with `ANTHROPIC_API_KEY` (the solver, and `claude -p`
