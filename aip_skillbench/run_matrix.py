@@ -23,6 +23,7 @@ from rich.table import Table
 from rich.text import Text
 
 from aip_skillbench._aip import read_aip_ref
+from aip_skillbench._provider import HF_TOKEN_ENV, Provider, redact_argv, redact_kv, safe_path_part
 
 ROOT = Path(__file__).resolve().parents[1]
 VENDOR_SKILLSBENCH = ROOT / "vendor" / "skillsbench"
@@ -82,7 +83,7 @@ class Cell:
 
     @property
     def safe_name(self) -> str:
-        return f"{self.task}__{self.model}__{self.mode}__t{self.trial}"
+        return f"{self.task}__{safe_path_part(self.model)}__{self.mode}__t{self.trial}"
 
 
 @dataclass
@@ -238,7 +239,10 @@ def _read_dotenv(path: Path) -> dict[str, str]:
     return out
 
 
-def _validate_api_key(agent: str) -> None:
+def _validate_api_key(agent: str, provider: Provider = Provider.anthropic) -> None:
+    # benchflow still requires the agent's own key even when the solver is routed elsewhere.
+    if provider is Provider.hf and not _read_dotenv(ROOT / ".env").get(HF_TOKEN_ENV):
+        raise typer.BadParameter(f"--provider hf needs {HF_TOKEN_ENV} in .env")
     env_var = AGENT_KEY_ENV.get(agent)
     if env_var is None:
         return  # unknown agent — skip
@@ -292,6 +296,7 @@ def _run_cell(
     decision_model: bool = False,
     aip_nudge: bool = True,
     agent_env: list[str] | None = None,
+    provider: Provider = Provider.anthropic,
 ) -> CellResult:
     state.mark_running(cell)
     cell_jobs_dir = out / "cells" / cell.safe_name
@@ -316,9 +321,11 @@ def _run_cell(
         cmd.append("--no-aip-nudge")
     for kv in agent_env or []:
         cmd += ["--agent-env", kv]
+    if provider is not Provider.anthropic:
+        cmd += ["--provider", provider.value]
     started_at = datetime.now().isoformat()
     with open(log_path, "w") as logf:
-        logf.write("$ " + " ".join(cmd) + "\n\n")
+        logf.write("$ " + " ".join(redact_argv(cmd)) + "\n\n")
         logf.flush()
         proc = subprocess.run(cmd, cwd=ROOT, stdout=logf, stderr=subprocess.STDOUT)
     finished_at = datetime.now().isoformat()
@@ -451,6 +458,7 @@ def run_matrix(
     decision_model: bool = False,
     aip_nudge: bool = True,
     agent_env: list[str] | None = None,
+    provider: Provider = Provider.anthropic,
 ) -> int:
     if not tasks:
         raise typer.BadParameter("no tasks specified (use --task ... or --config)")
@@ -465,7 +473,7 @@ def run_matrix(
 
     _validate_tasks(tasks)
     _validate_generated_skills(tasks, modes)
-    _validate_api_key(agent)
+    _validate_api_key(agent, provider)
 
     cells = _build_cells(tasks, models, modes, trials)
     if shuffle:
@@ -486,7 +494,7 @@ def run_matrix(
     typer.echo(
         f"  total cells: {len(cells)}   already done: {len(done)}   to run: {len(pending)}"
     )
-    typer.echo(f"  concurrency: {concurrency}   agent: {agent}   sandbox: {sandbox}")
+    typer.echo(f"  concurrency: {concurrency}   agent: {agent}   sandbox: {sandbox}   provider: {provider.value}")
     if not pending:
         typer.echo("Nothing to do.")
         return 0
@@ -511,7 +519,8 @@ def run_matrix(
                 "sandbox": sandbox,
                 "decision_model": decision_model,
                 "aip_nudge": aip_nudge,
-                "agent_env": agent_env or [],
+                "agent_env": [redact_kv(kv) for kv in agent_env or []],
+                "provider": provider.value,
                 "aip_version": aip_ref.get("aip_version"),
                 "aip_ref": aip_ref,
                 "total_cells": len(cells),
@@ -539,7 +548,9 @@ def run_matrix(
     with Live(_render(state), refresh_per_second=2, console=console) as live:
         with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as ex:
             futures = {
-                ex.submit(_run_cell, c, out, agent, sandbox, state, decision_model, aip_nudge, agent_env): c
+                ex.submit(
+                    _run_cell, c, out, agent, sandbox, state, decision_model, aip_nudge, agent_env, provider
+                ): c
                 for c in pending
             }
             try:

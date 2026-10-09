@@ -36,6 +36,12 @@ CLI entry point (and the `bench` subprocess via `_bench_launcher`) gets them.
    Any failure raises: an AIP-mode trial without its client, server, or
    procedure is a different experimental condition and must not pass silently.
 
+3. Secret solver env. `AIP_SKILLBENCH_SECRET_AGENT_ENV` (JSON object, set by
+   `eval --provider hf`) is merged into the agent env as explicit keys before
+   benchflow resolves it, so the token reaches the solver without riding a command
+   line and still beats the `.env` values benchflow inherits. benchflow's
+   config.json writer drops these keys by name.
+
 Track these here — if they end up upstream in benchflow, delete and remove
 the import.
 """
@@ -63,6 +69,7 @@ from aip_skillbench._aip import (
     SERVER_EXTRA_ENV,
     WHEEL_ENV,
 )
+from aip_skillbench._provider import SECRET_AGENT_ENV
 
 logger = logging.getLogger(__name__)
 
@@ -336,3 +343,15 @@ _rollout._start_env_and_upload = _patched_start_env_and_upload
 # so we have to patch the binding in that module too.
 _sdk._start_env_and_upload = _patched_start_env_and_upload
 logger.info("Patched benchflow._start_env_and_upload (pre-create /app /solution; aip container setup)")
+
+
+_orig_resolve_agent_env = _rollout.resolve_agent_env
+
+
+def _patched_resolve_agent_env(agent: str, model: str | None, agent_env: dict[str, str] | None) -> dict[str, str]:
+    secret = json.loads(os.environ.get(SECRET_AGENT_ENV) or "{}")
+    return _orig_resolve_agent_env(agent, model, {**(agent_env or {}), **secret})
+
+
+# rollout.py imported resolve_agent_env by name; patch that binding.
+_rollout.resolve_agent_env = _patched_resolve_agent_env

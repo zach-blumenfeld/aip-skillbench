@@ -39,6 +39,14 @@ from aip_skillbench._aip import (
     skill_dirs,
     validate_packs,
 )
+from aip_skillbench._provider import (
+    HF_TOKEN_ENV,
+    SECRET_AGENT_ENV,
+    Provider,
+    hf_agent_env,
+    redact_argv,
+    safe_path_part,
+)
 
 VENDOR_SKILLSBENCH = ROOT / "vendor" / "skillsbench"
 VENDOR_SKILL_CREATOR = VENDOR_SKILLSBENCH / ".agents" / "skills" / "skill-creator"
@@ -127,8 +135,7 @@ def _bench(*args: str, env: dict[str, str] | None = None) -> int:
     aip_skillbench._bench_launcher ensures the patches load first.
     """
     cmd = ["uv", "run", "python", "-m", "aip_skillbench._bench_launcher", *args]
-    shown = [a if not a.startswith("TYPESAFE_API_KEY=") else "TYPESAFE_API_KEY=…" for a in args]
-    typer.echo("$ uv run bench " + " ".join(shown))  # log the user-friendly form
+    typer.echo("$ uv run bench " + " ".join(redact_argv(list(args))))  # log the user-friendly form
     return subprocess.call(cmd, env={**os.environ, **(env or {})})
 
 
@@ -273,6 +280,11 @@ def eval(
         help="Repeatable KEY=VALUE for the solver process in the container (e.g. "
              "MAX_THINKING_TOKENS=0 for models the bundled harness cannot send thinking params to).",
     ),
+    provider: Provider = typer.Option(
+        Provider.anthropic, "--provider", case_sensitive=False,
+        help="Where the solver's model calls go. `hf`: Hugging Face Inference Providers, with "
+             "HF_TOKEN from .env and the provider pinned in --model (e.g. Qwen/Qwen3.5-9B:deepinfra).",
+    ),
     bake_agent: bool = typer.Option(
         True, "--bake-agent/--no-bake-agent",
         help="Bake the agent (Node + its npm package) into the task image once instead of "
@@ -295,8 +307,15 @@ def eval(
             f"--decision-model applies only to --mode aip-runtime (got {mode.value})",
             param_hint="'--decision-model'",
         )
-    out = jobs_dir or (JOBS_DIR / f"{task}-{mode.value}-{model}")
+    out = jobs_dir or (JOBS_DIR / f"{task}-{mode.value}-{safe_path_part(model)}")
     env: dict[str, str] = {}
+    provider_env: list[str] = []
+    if provider is Provider.hf:
+        token = _read_dotenv(ROOT / ".env").get(HF_TOKEN_ENV)
+        if not token:
+            raise typer.BadParameter(f"--provider hf needs {HF_TOKEN_ENV} in .env", param_hint="'--provider'")
+        provider_env, secret = hf_agent_env(model, token)
+        env[SECRET_AGENT_ENV] = json.dumps(secret)
     if bake_agent:
         env[BAKE_ENV] = agent
 
@@ -367,7 +386,7 @@ def eval(
     else:
         raise typer.BadParameter(f"unknown mode: {mode}")
 
-    for kv in agent_env:
+    for kv in [*provider_env, *agent_env]:
         if "=" not in kv:
             raise typer.BadParameter(f"--agent-env expects KEY=VALUE, got {kv!r}")
         extra += ["--agent-env", kv]
@@ -791,6 +810,10 @@ def run_matrix_cmd(
     agent_env: list[str] = typer.Option(
         [], "--agent-env", help="Repeatable KEY=VALUE for the solver process. Config key `agent_env` (list)."
     ),
+    provider: Optional[Provider] = typer.Option(
+        None, "--provider", case_sensitive=False,
+        help="Solver model route, passed to each cell's eval: anthropic (default) or hf. Config key `provider`.",
+    ),
 ) -> None:
     """Run a (task × model × mode × trial) eval matrix concurrently with live progress."""
     from aip_skillbench.run_matrix import ALL_MODES, run_matrix
@@ -822,6 +845,7 @@ def run_matrix_cmd(
     )
     nudge_resolved = aip_nudge if aip_nudge is not None else bool(cfg.get("aip_nudge", True))
     agent_env_resolved = list(agent_env) or [str(x) for x in cfg.get("agent_env", [])]
+    provider_resolved = provider or Provider(cfg.get("provider", Provider.anthropic.value))
 
     rc = run_matrix(
         tasks=tasks_resolved,
@@ -838,6 +862,7 @@ def run_matrix_cmd(
         decision_model=decision_resolved,
         aip_nudge=nudge_resolved,
         agent_env=agent_env_resolved,
+        provider=provider_resolved,
     )
     raise typer.Exit(rc)
 

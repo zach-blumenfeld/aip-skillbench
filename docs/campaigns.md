@@ -179,6 +179,47 @@ start date, so to resume on a later day name it explicitly:
 `CAMPAIGN_OUT=runs/campaign-5-2026-10-07 bash scripts/run-campaign.sh 5`. To retry the
 cells that errored, see `scripts/retry_errors.py`; `--force` re-runs every cell.
 
+### Running an open-weight solver
+
+`--provider hf` (on `eval` and `run-matrix`; config key `provider`) sends the solver's
+model calls to Hugging Face Inference Providers, whose router speaks the Anthropic
+Messages protocol, instead of Anthropic. The agent is still `claude-agent-acp`.
+
+```bash
+uv run aip-skillbench run-matrix --config configs/campaign-5.yaml \
+  --model Qwen/Qwen3.5-9B:deepinfra --provider hf --agent-env MAX_THINKING_TOKENS=0 ...
+```
+
+- **Token.** `HF_TOKEN` in `.env` (a token with "Make calls to Inference Providers").
+  `ANTHROPIC_API_KEY` must stay in `.env` too: benchflow requires it for this agent, but
+  with `hf` it is overridden in the solver's env and never sent to the router. The token
+  reaches the `bench` subprocess as JSON in `AIP_SKILLBENCH_SECRET_AGENT_ENV`, never on a
+  command line. `campaign.json` and the `$ ...` line of each cell log show
+  `<redacted>` for any `--agent-env` key containing KEY, TOKEN, SECRET, PASSWORD or
+  CREDENTIALS (except `*_TOKENS` counts), and benchflow's `config.json` leaves such keys
+  out.
+- **What it sets.** `ANTHROPIC_BASE_URL=https://router.huggingface.co` (via
+  `BENCHFLOW_PROVIDER_BASE_URL`), the token as `ANTHROPIC_AUTH_TOKEN` (sent as
+  `Authorization: Bearer`) and `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` = `--model`, and
+  `ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS}_MODEL` plus `CLAUDE_CODE_SUBAGENT_MODEL` = `--model`
+  so Claude Code's side calls never ask for a Claude tier. `API_TIMEOUT_MS=300000`: Claude
+  Code's default (600 s) equals benchflow's idle watchdog, so a hung router request killed
+  the trial before Claude Code could retry it.
+- **Provider pin.** Always suffix the model with `:<provider>`; never let the router pick.
+  Check what is live with
+  `curl -s "https://huggingface.co/api/models/<org>/<model>?expand[]=inferenceProviderMapping"`.
+  For `Qwen/Qwen3.5-9B` use `:deepinfra` (US). `:together` returns about half its tool
+  calls as `<tool_call>` text inside the reasoning block instead of a `tool_use` block, which
+  ends the agent's turn; `:deepinfra` and `:featherless-ai` parsed 6 of 6 (2026-10-09).
+  Model strings with `/` and `:` become `_` in cell and job directory names;
+  `summary.csv` keeps the full string.
+- **Caveats.** Qwen3.5 always reasons, whatever `MAX_THINKING_TOKENS` says (keep it at 0
+  for parity anyway). The router reports `output_tokens` as 1, so token and cost figures
+  in trajectories are wrong for these solvers.
+- **Fallback models** if a solver cannot drive the tool loop:
+  `Qwen/Qwen3-Coder-30B-A3B-Instruct` then `google/gemma-4-31b` (see
+  `docs/weak-solver-plan.md`).
+
 ## Cost and wall clock
 
 Compile (Opus 4.7 under the 0.5a1 checklist, measured 2026-10-06: $2–4 and 10–15 min per
