@@ -209,23 +209,34 @@ Verify: the decision and its two or three supporting numbers are written here. C
 These are the fixes from `runs/campaign-28-aip-h55-nothink-2026-10-08/REPORT.md` section 5. Each
 is its own step; tick them here as they land. They must all be in before any 28-task rerun.
 
-### B1. aip runtime: decision resume keeps extra keys; `info` lists all graph inputs  [ ]
-`aip/model/steps.py` decision `respond` builds the next state from `payload` plus question
-answers only, dropping any other key the client sends; `aip info` shows only the start step's
-inputs. Merge non-question keys on resume (as client_task already does) and make `info` list
-every input the graph will need. Test: dialogue-parser pack through `aip run` with the four path
-keys supplied at the conventions pause reaches `build` without `invalid_input`.
+### B1. aip-spec validator: every consumed input is produced upstream or declared at start  [ ]
+Benchmark symptom: the dialogue-parser pack's start step declared one input while a later step
+needed four path keys nothing upstream produced; the runtime correctly refused to let the client
+inject them at a decision pause (spec-mode solvers simply invented them). The defect is in the
+pack and the fix belongs at write time: a validator rule that each input a step consumes is
+either produced by an upstream step or declared on the start step, and `aip info` lists those
+start inputs. Do not loosen `resume` to accept arbitrary state; that weakens the contract. Test:
+the current dialogue-parser pack fails validation with a message naming the four keys; after
+declaring them on the start step it validates and runs through `build` under `aip run`.
 
-### B2. aip runtime: server-side steps run as the sandbox user  [ ]
-Execution steps run as root in the solver's working tree, leaving root-owned outputs the solver
-cannot amend (drone-planning-control runtime t2). Run steps as the user that owns the working
-directory, or `chown` outputs to it. Test: after a server-executed step writes under a directory
-owned by a non-root user, that user can modify the files.
+### B2. aip server design note: where server-side step outputs live  [ ]
+Benchmark symptom: server and agent shared one container; the server ran as root and a pack
+script wrote results into the agent's home, which the agent then could not modify. The earlier
+"run steps as the sandbox user" idea is a benchmark-only hack; do not implement it. The real
+question for a customer deployment, where the server is on another machine and there is no
+shared disk, is how a step's file outputs reach the client at all. Write this up as a design
+note in the aip repo (`docs/server-design.md`): options are outputs returned as artifacts in
+the run state, or a declared client-owned workspace. For the benchmark, the workaround is
+deployment config, not code: start `aip server` as the same user as the agent in
+`_benchflow_patch.py` (B5 touches that script). Test for the note: none; test for the
+workaround: a server-executed step's output files are owned by the agent user.
 
-### B3. aip runtime: run file location independent of shell cwd  [ ]
-The run file is written relative to the shell cwd, so a solver that `cd`s loses its run. Write it
-under a fixed per-run location (home or the server-reported path). Test: `aip run`, `cd /tmp`,
-`aip resume` still finds the run.
+### B3. aip client: run state lives under the user's home, keyed by run id  [ ]
+`aip run` writes its run file into the current directory and `aip resume` looks for it there;
+a client that changes directory loses the run. Plain client usability bug, not benchmark
+specific. Keep client-side run state under a fixed per-user location (e.g. `~/.aip/runs/<id>`),
+print the run id at every pause, and let `resume` take the id. Test: `aip run`, `cd /tmp`,
+`aip resume <id>` continues the run.
 
 ### B4. harness: Python bootstrap for images below 3.10  [ ]
 fix-build-google-auto and suricata-custom-exfil images ship Python 3.9; `aip` uses `match`
