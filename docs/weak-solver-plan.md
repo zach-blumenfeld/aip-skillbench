@@ -96,6 +96,21 @@ before Track B lands.
 
 Verify: the four checks above pass. Record the working auth header in a note under this step.
 
+BLOCKED: the Hugging Face account behind `HF_TOKEN` has no Inference Providers credits. The
+router answers check 3 with `api_error` "You have no remaining credits. Purchase pre-paid
+credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly
+included credits." Fix: add pre-paid credits (or PRO) to that account, then rerun check 3.
+
+Notes (2026-10-09, on `zach-aip-skillbench`):
+- Check 1 passes: up to date with `aip-0.4a0`, `uv sync` clean, `aip-spec --version` is 0.5a1,
+  28 of 28 packs validate.
+- Check 2 passes: `.env` has exactly one `HF_TOKEN=` line and an `ANTHROPIC_API_KEY=` line.
+- Check 3 is blocked (see above). Auth header: `Authorization: Bearer` works. The token
+  authenticates and the request reaches the billing check, while a bogus token gets "Invalid
+  username or password". `x-api-key` gets an HTML 401, so use Bearer. That matches Claude
+  Code's `ANTHROPIC_AUTH_TOKEN`, which is sent as Bearer.
+- Check 4 passes: `together`, `deepinfra`, `featherless-ai` and `ovhcloud` all show `"status": "live"`.
+
 ### S1. Harness: `--provider hf` for eval and run-matrix  [ ]
 
 Add a `--provider` option (values: `anthropic` default, `hf`) to `eval` and `run-matrix` in
