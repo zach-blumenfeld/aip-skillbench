@@ -219,17 +219,16 @@ start inputs. Do not loosen `resume` to accept arbitrary state; that weakens the
 the current dialogue-parser pack fails validation with a message naming the four keys; after
 declaring them on the start step it validates and runs through `build` under `aip run`.
 
-### B2. aip server design note: where server-side step outputs live  [ ]
-Benchmark symptom: server and agent shared one container; the server ran as root and a pack
-script wrote results into the agent's home, which the agent then could not modify. The earlier
-"run steps as the sandbox user" idea is a benchmark-only hack; do not implement it. The real
-question for a customer deployment, where the server is on another machine and there is no
-shared disk, is how a step's file outputs reach the client at all. Write this up as a design
-note in the aip repo (`docs/server-design.md`): options are outputs returned as artifacts in
-the run state, or a declared client-owned workspace. For the benchmark, the workaround is
-deployment config, not code: start `aip server` as the same user as the agent in
-`_benchflow_patch.py` (B5 touches that script). Test for the note: none; test for the
-workaround: a server-executed step's output files are owned by the agent user.
+### B2. aip: execution steps run on the client (design accepted, scripts only)  [ ]
+Design: `docs/aip-client-execution-design.md` (move into `aip/docs/server-design.md` when
+adopted). The server holds packs and owns graph, routing, validation and history; the `aip`
+client fetches the pinned revision's `scripts/` and `assets/`, runs each execution step locally
+next to the files with the existing stdin/stdout JSON contract, and posts results back, with no
+agent involvement between pauses. Format additions in aip-spec: a required environment
+declaration for packs with execution steps, an optional launch command for non-Python scripts.
+Decision steps are not part of this item. Benchmark workaround until it lands: start the
+in-container server as the agent user. Test: with server and client on different hosts, a
+file-writing pack (drone-planning-control) completes and its outputs are on the client.
 
 ### B3. aip client: run state lives under the user's home, keyed by run id  [ ]
 `aip run` writes its run file into the current directory and `aip resume` looks for it there;
