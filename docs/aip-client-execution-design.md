@@ -1,8 +1,8 @@
 # AIP design note: execution steps run on the client
 
 Status: proposal, 2026-10-09. Written here so the aip repo stays untouched until it is adopted;
-it belongs in `aip/docs/server-design.md` once accepted. Scope: execution steps (scripts) only.
-Decision steps are deliberately not covered and will be designed separately.
+it belongs in `aip/docs/server-design.md` once accepted. Scope: execution steps (scripts), and
+decision steps under the same rule (see "Decision steps").
 
 ## The problem
 
@@ -101,8 +101,31 @@ files.
 - **Integration.** The client becomes the executor any agent harness talks to. Wrapping it as a
   local MCP server (`aip_search`, `aip_run`, `aip_resume`) is the natural packaging and would
   replace the memory-file nudge used in the benchmark.
-- **Not decided here.** Where decision steps are answered and by what. Where the decision-model
-  key lives follows from that decision.
+
+## Decision steps
+
+Same rule as scripts: the client resolves them automatically; the agent only sees a decision
+nothing else could answer.
+
+- **Today:** the server answers a decision with the decision model (TypeSafe) when the key is in
+  the server's environment, otherwise pauses; the client only ever answers a pause.
+- **After:** the client answers the decision with the decision model when its key is configured
+  on the client (`aip config`), applies the pack's confidence threshold, and pauses for the agent
+  only when no resolver is configured or confidence is below threshold (a review pause, accepted
+  with an empty answer or overridden). It posts the answer to the server with attribution.
+- **Server:** validates the answer against the declared question type, routes on it, and records
+  in the run history: resolver kind (`typesafe` or `manual`), model name, confidence if any,
+  whether it was reviewed, and the final answer. That record is the provenance, regardless of
+  which resolver ran.
+
+Deliberately not included: a general-model resolver (a plain chat call or a harness sub-agent).
+Its self-reported confidence is not calibrated, so the threshold and review pause would be
+meaningless for it. An agent that wants to delegate a pause to a sub-agent can do so in its own
+harness and answer with `resume`; that needs no protocol support.
+
+Consequence: the server needs no model-vendor key at all, which fits self-hosted deployments.
+In the benchmark harness, the key passed by `--decision-model` moves from the in-container
+server's environment to the solver's.
 
 ## Open questions for the implementer
 
