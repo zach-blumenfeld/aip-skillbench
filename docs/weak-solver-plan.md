@@ -115,7 +115,7 @@ Notes (2026-10-09, on `zach-aip-skillbench`):
     do not rely on the trajectories' token or cost figures for this solver.
 - Check 4 passes: `together`, `deepinfra`, `featherless-ai` and `ovhcloud` all show `"status": "live"`.
 
-### S1. Harness: `--provider hf` for eval and run-matrix  [ ]
+### S1. Harness: `--provider hf` for eval and run-matrix  [x]
 
 Add a `--provider` option (values: `anthropic` default, `hf`) to `eval` and `run-matrix` in
 `aip_skillbench/cli.py`, config key `provider`, threaded through `run_matrix.py` into each cell's
@@ -141,7 +141,7 @@ Add a `--provider` option (values: `anthropic` default, `hf`) to `eval` and `run
   what it sets, where the token lives, the provider-pin syntax, the fallback models).
 
 Verify:
-1. `uv run aip-skillbench eval --task exoplanet-detection-period --mode human-curated --model Qwen/Qwen3.5-9B:together --provider hf --agent-env MAX_THINKING_TOKENS=0 --jobs-dir jobs/s1-check` runs one trial to completion (pass or fail is irrelevant here).
+1. `uv run aip-skillbench eval --task exoplanet-detection-period --mode human-curated --model Qwen/Qwen3.5-9B:deepinfra --provider hf --agent-env MAX_THINKING_TOKENS=0 --jobs-dir jobs/s1-check` runs one trial to completion (pass or fail is irrelevant here).
 2. In that trial's `config.json`, `agent_env` shows `ANTHROPIC_BASE_URL=https://router.huggingface.co`, `ANTHROPIC_MODEL=Qwen/Qwen3.5-9B:together`, the four tier-model variables, and no key or token values.
 3. `grep -rIl "$(grep '^HF_TOKEN=' .env | cut -d= -f2-)" jobs/s1-check runs 2>/dev/null` prints nothing (the token appears in no output file).
 4. The trial's `agent/acp_trajectory.jsonl` contains at least one completed tool call and no 401/403/404 or "model not found" text. If the model's responses show thinking-parameter or tier-name errors, fix the env (not the model) and rerun.
@@ -149,12 +149,46 @@ Verify:
 
 Commit, then push (`git push origin aip-0.4a0`) so the VM and the laptop share it.
 
+Notes (2026-10-09, on `zach-aip-skillbench`):
+- Implemented in `aip_skillbench/_provider.py` (env, redaction, path sanitising), `cli.py`
+  (`--provider` on `eval` and `run-matrix`, config key `provider`), `run_matrix.py` and
+  `_benchflow_patch.py`. The secret entries (`BENCHFLOW_PROVIDER_API_KEY`,
+  `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`) never go on a command line: `eval` passes
+  them to the `bench` subprocess as JSON in `AIP_SKILLBENCH_SECRET_AGENT_ENV`, and a patch
+  on `rollout.resolve_agent_env` merges them in as explicit keys. Redaction exempts
+  `*_TOKENS` keys so `MAX_THINKING_TOKENS=0` stays visible in `campaign.json` and the
+  cell logs (benchflow's own `config.json` filter still drops it).
+- **Provider pin changed from `:together` to `:deepinfra`** (same model, still US). The
+  first check run on `:together` ended after 1 tool call: the model wrote its next call as
+  `<tool_call>` XML inside the reasoning block and the turn ended. A direct probe (one
+  tool-result turn, 5 to 6 requests each) showed Together returns this malformed form about
+  half the time whatever the thinking parameter is (none 3/5, disabled 3/5, enabled 2/5
+  malformed), while `:deepinfra` and `:featherless-ai` returned a structured `tool_use`
+  6 of 6 times. Check 1 above, S2 and S3 now use `:deepinfra`.
+- Added `API_TIMEOUT_MS=300000` to the hf env. The `:deepinfra` check run made 44 tool
+  calls, then one router request hung and benchflow's 600 s idle watchdog ended the trial
+  (`error: Agent idle for 600s`). That equals Claude Code's default request timeout, so
+  Claude Code never got to retry. Not yet exercised in a live run; S2 will show it.
+- Check 1 passes: the trial ran to completion with a `result.json` (reward 0, 44 tool
+  calls, 2224 s, ended by the idle watchdog as above).
+- Check 2 passes: `config.json` `agent_env` has `ANTHROPIC_BASE_URL=https://router.huggingface.co`,
+  `ANTHROPIC_MODEL=Qwen/Qwen3.5-9B:deepinfra`, the four tier/subagent variables, and no key
+  or token entries.
+- Check 3 passes: the token grep over `jobs/s1-check` and `runs` prints nothing.
+- Check 4 passes: 14 tool calls completed, 30 failed (all the solver's own Python
+  scripts exiting 1, apart from one Read of an oversized file), and no 401/403/404 or
+  "model not found" text. The trajectory is at `trajectory/acp_trajectory.jsonl` in this
+  benchflow version, not `agent/`.
+- Check 5: the repo has no test suite and pytest isn't a dependency. `compileall` is clean,
+  and ruff on the touched files reports only rule kinds the files already had (UP042,
+  B008, UP045).
+
 ### S2. Smoke test: one task, three modes, one trial  [ ]
 
 ```sh
 OUT=runs/smoke-1-qwen35-9b-$(date +%F)
 uv run aip-skillbench run-matrix --config configs/campaign-1.yaml \
-  --model Qwen/Qwen3.5-9B:together --provider hf \
+  --model Qwen/Qwen3.5-9B:deepinfra --provider hf \
   --agent-env MAX_THINKING_TOKENS=0 \
   --trials 1 --concurrency 3 --out "$OUT" --yes
 ```
@@ -179,7 +213,7 @@ mapping first as in S0.4), rerun, and note which model continues. Commit the not
 OUT=runs/pilot-5-qwen35-9b-$(date +%F)
 tmux new -s bench   # then inside:
 uv run aip-skillbench run-matrix --config configs/campaign-5.yaml \
-  --model Qwen/Qwen3.5-9B:together --provider hf \
+  --model Qwen/Qwen3.5-9B:deepinfra --provider hf \
   --agent-env MAX_THINKING_TOKENS=0 \
   --trials 5 --concurrency 5 --out "$OUT" --yes
 ```
