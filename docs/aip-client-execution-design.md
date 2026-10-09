@@ -98,9 +98,16 @@ files.
 - **Server statelessness.** With the client holding the run file and the history in the backend
   (Neo4j or filesystem), any server replica can answer any request. Keep per-run state out of
   server memory.
-- **Integration.** The client becomes the executor any agent harness talks to. Wrapping it as a
-  local MCP server (`aip_search`, `aip_run`, `aip_resume`) is the natural packaging and would
-  replace the memory-file nudge used in the benchmark.
+- **Integration.** The client is the executor any agent harness talks to, through the `aip`
+  command. Wrapping it as a local MCP server is deliberately deferred: it adds a layer to the
+  stack for no new capability, and a published procedure is already a tool from the agent's view
+  (typed start input, runs to completion, pauses only when it must) with a whole workflow behind
+  it, which covers many of the cases people reach for MCP for today.
+- **Client tasks stay with the calling agent.** A configured model is not used to perform client
+  tasks. Most need tools (edit code, fix a build, write files), which would make the aip client an
+  agent harness of its own, and the calling agent already has the context and is waiting. A later
+  opt-in for text-only client tasks (report, draft, classification) via a configured model is
+  possible but out of scope.
 
 ## Decision steps
 
