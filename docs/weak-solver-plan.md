@@ -73,7 +73,7 @@ before Track B lands.
 
 ## Steps
 
-### S0. Machine ready and the Hugging Face route proven  [ ]
+### S0. Machine ready and the Hugging Face route proven  [x]
 
 1. On the VM: `export PATH="$HOME/.local/bin:$PATH"`, `git pull`, `uv sync`, then verify per
    `docs/campaigns.md`: `aip-spec --version` prints 0.5a1 and all 28 packs validate.
@@ -96,19 +96,23 @@ before Track B lands.
 
 Verify: the four checks above pass. Record the working auth header in a note under this step.
 
-BLOCKED: the Hugging Face account behind `HF_TOKEN` has no Inference Providers credits. The
-router answers check 3 with `api_error` "You have no remaining credits. Purchase pre-paid
-credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly
-included credits." Fix: add pre-paid credits (or PRO) to that account, then rerun check 3.
-
 Notes (2026-10-09, on `zach-aip-skillbench`):
 - Check 1 passes: up to date with `aip-0.4a0`, `uv sync` clean, `aip-spec --version` is 0.5a1,
   28 of 28 packs validate.
 - Check 2 passes: `.env` has exactly one `HF_TOKEN=` line and an `ANTHROPIC_API_KEY=` line.
-- Check 3 is blocked (see above). Auth header: `Authorization: Bearer` works. The token
-  authenticates and the request reaches the billing check, while a bogus token gets "Invalid
-  username or password". `x-api-key` gets an HTML 401, so use Bearer. That matches Claude
-  Code's `ANTHROPIC_AUTH_TOKEN`, which is sent as Bearer.
+- Check 3 passes once credits are on the account (the first attempt failed with "no remaining
+  credits"). It returns HTTP 200 with `"model":"Qwen/Qwen3.5-9B"` and the final text block
+  `ready`, in about 1 to 3 s; the first request after the top-up hung past 90 s and later ones
+  were fast.
+  - **Auth header: `Authorization: Bearer`**, which matches what Claude Code sends from
+    `ANTHROPIC_AUTH_TOKEN`. `x-api-key` gets an HTML 401.
+  - **The model always thinks.** Responses open with a `thinking` block whose signature is
+    `"unsigned"`, and `"thinking":{"type":"disabled"}` is ignored. With `max_tokens` 40 the
+    whole budget goes to thinking and no text comes back, so allow a large `max_tokens`.
+    `MAX_THINKING_TOKENS=0` therefore does not stop Qwen's reasoning. Keep it anyway for parity,
+    but in S1 and S2 watch for errors when Claude Code sends the unsigned thinking blocks back.
+  - **Usage is wrong.** `usage.output_tokens` comes back as 1 however much the model wrote, so
+    do not rely on the trajectories' token or cost figures for this solver.
 - Check 4 passes: `together`, `deepinfra`, `featherless-ai` and `ovhcloud` all show `"status": "live"`.
 
 ### S1. Harness: `--provider hf` for eval and run-matrix  [ ]
