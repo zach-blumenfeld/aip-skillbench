@@ -14,7 +14,8 @@ from enum import Enum
 
 HF_ROUTER_URL = "https://router.huggingface.co"
 HF_TOKEN_ENV = "HF_TOKEN"
-HF_REQUEST_TIMEOUT_MS = 300_000
+HF_REQUEST_TIMEOUT_MS = 120_000
+HF_MAX_OUTPUT_TOKENS = 32_000
 
 # JSON object of agent env entries too secret for argv; read in the `bench` subprocess.
 SECRET_AGENT_ENV = "AIP_SKILLBENCH_SECRET_AGENT_ENV"
@@ -50,7 +51,7 @@ def redact_argv(args: list[str]) -> list[str]:
 def hf_agent_env(model: str, token: str) -> tuple[list[str], dict[str, str]]:
     """(public KEY=VALUE entries for --agent-env, secret entries for SECRET_AGENT_ENV).
 
-    `model` carries the provider pin, e.g. `Qwen/Qwen3.5-9B:deepinfra`. Every Claude
+    `model` carries the provider pin, e.g. `Qwen/Qwen3.5-9B:featherless-ai`. Every Claude
     tier name maps to it so Claude Code's side calls never ask the router for Claude.
     ANTHROPIC_API_KEY is overridden so the real Anthropic key is never sent to the router.
     """
@@ -61,8 +62,12 @@ def hf_agent_env(model: str, token: str) -> tuple[list[str], dict[str, str]]:
         f"ANTHROPIC_DEFAULT_OPUS_MODEL={model}",
         f"CLAUDE_CODE_SUBAGENT_MODEL={model}",
         # Claude Code's default request timeout is 600 s, the same as benchflow's idle
-        # watchdog, so one hung router request ended a trial before Claude Code retried it.
+        # watchdog, so one hung request ended a trial before Claude Code retried it. A
+        # normal turn on featherless-ai takes 4 to 13 s.
         f"API_TIMEOUT_MS={HF_REQUEST_TIMEOUT_MS}",
+        # Claude Code asks for 64k output tokens; featherless-ai rejects anything above
+        # about 32k and the router turns that into an empty 200, which ends the turn.
+        f"CLAUDE_CODE_MAX_OUTPUT_TOKENS={HF_MAX_OUTPUT_TOKENS}",
     ]
     secret = {
         "BENCHFLOW_PROVIDER_API_KEY": token,

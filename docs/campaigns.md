@@ -187,7 +187,7 @@ Messages protocol, instead of Anthropic. The agent is still `claude-agent-acp`.
 
 ```bash
 uv run aip-skillbench run-matrix --config configs/campaign-5.yaml \
-  --model Qwen/Qwen3.5-9B:deepinfra --provider hf --agent-env MAX_THINKING_TOKENS=0 ...
+  --model Qwen/Qwen3.5-9B:featherless-ai --provider hf --agent-env MAX_THINKING_TOKENS=0 ...
 ```
 
 - **Token.** `HF_TOKEN` in `.env` (a token with "Make calls to Inference Providers").
@@ -202,15 +202,18 @@ uv run aip-skillbench run-matrix --config configs/campaign-5.yaml \
   `BENCHFLOW_PROVIDER_BASE_URL`), the token as `ANTHROPIC_AUTH_TOKEN` (sent as
   `Authorization: Bearer`) and `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` = `--model`, and
   `ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS}_MODEL` plus `CLAUDE_CODE_SUBAGENT_MODEL` = `--model`
-  so Claude Code's side calls never ask for a Claude tier. `API_TIMEOUT_MS=300000`: Claude
-  Code's default (600 s) equals benchflow's idle watchdog, so a hung router request killed
+  so Claude Code's side calls never ask for a Claude tier. `CLAUDE_CODE_MAX_OUTPUT_TOKENS=32000`:
+  Claude Code asks for 64k, featherless-ai rejects more than about 32k, and the router turns
+  the rejection into an empty 200 that ends the turn at once. `API_TIMEOUT_MS=120000`:
+  Claude Code's default (600 s) equals benchflow's idle watchdog, so a hung request killed
   the trial before Claude Code could retry it.
 - **Provider pin.** Always suffix the model with `:<provider>`; never let the router pick.
   Check what is live with
   `curl -s "https://huggingface.co/api/models/<org>/<model>?expand[]=inferenceProviderMapping"`.
-  For `Qwen/Qwen3.5-9B` use `:deepinfra` (US). `:together` returns about half its tool
-  calls as `<tool_call>` text inside the reasoning block instead of a `tool_use` block, which
-  ends the agent's turn; `:deepinfra` and `:featherless-ai` parsed 6 of 6 (2026-10-09).
+  For `Qwen/Qwen3.5-9B` use `:featherless-ai` (US): 4 to 13 s per agent turn. `:deepinfra`
+  parses tool calls but generates at 20 to 33 chars/s (30 to 60 s per turn; one 37-minute
+  trial). `:together` returns about half its tool calls as `<tool_call>` text inside the
+  reasoning block, which ends the turn (2026-10-09).
   Model strings with `/` and `:` become `_` in cell and job directory names;
   `summary.csv` keeps the full string.
 - **Caveats.** Qwen3.5 always reasons, whatever `MAX_THINKING_TOKENS` says (keep it at 0

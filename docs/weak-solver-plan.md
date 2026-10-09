@@ -141,7 +141,7 @@ Add a `--provider` option (values: `anthropic` default, `hf`) to `eval` and `run
   what it sets, where the token lives, the provider-pin syntax, the fallback models).
 
 Verify:
-1. `uv run aip-skillbench eval --task exoplanet-detection-period --mode human-curated --model Qwen/Qwen3.5-9B:deepinfra --provider hf --agent-env MAX_THINKING_TOKENS=0 --jobs-dir jobs/s1-check` runs one trial to completion (pass or fail is irrelevant here).
+1. `uv run aip-skillbench eval --task exoplanet-detection-period --mode human-curated --model Qwen/Qwen3.5-9B:featherless-ai --provider hf --agent-env MAX_THINKING_TOKENS=0 --jobs-dir jobs/s1-check` runs one trial to completion (pass or fail is irrelevant here).
 2. In that trial's `config.json`, `agent_env` shows `ANTHROPIC_BASE_URL=https://router.huggingface.co`, `ANTHROPIC_MODEL=Qwen/Qwen3.5-9B:together`, the four tier-model variables, and no key or token values.
 3. `grep -rIl "$(grep '^HF_TOKEN=' .env | cut -d= -f2-)" jobs/s1-check runs 2>/dev/null` prints nothing (the token appears in no output file).
 4. The trial's `agent/acp_trajectory.jsonl` contains at least one completed tool call and no 401/403/404 or "model not found" text. If the model's responses show thinking-parameter or tier-name errors, fix the env (not the model) and rerun.
@@ -179,6 +179,26 @@ Notes (2026-10-09, on `zach-aip-skillbench`):
   scripts exiting 1, apart from one Read of an oversized file), and no 401/403/404 or
   "model not found" text. The trajectory is at `trajectory/acp_trajectory.jsonl` in this
   benchflow version, not `agent/`.
+- **Follow-up the same day: pin moved again to `:featherless-ai`, and two env fixes.** The
+  `:deepinfra` trial took 2224 s: DeepInfra generates at 20 to 33 chars/s, so each turn
+  took ~35 s (a trivial request took 19 to 59 s), and one request hung for 10 min.
+  `:featherless-ai` generates at 350 to 470 chars/s. But every Claude Code request to it
+  came back as an empty 200 in about 1 s: Claude Code asks for `max_tokens` 64000, and
+  featherless rejects anything above about 32k (32000 works, 40000 fails; it isn't a
+  context limit, since 65k input works), which the router turns into an empty message.
+  Fixed with `CLAUDE_CODE_MAX_OUTPUT_TOKENS=32000`, and `API_TIMEOUT_MS` lowered to 120000.
+  Found by putting a logging proxy between the container and the router. Reasoning can't
+  be turned off through the router (`chat_template_kwargs`, `reasoning_effort`,
+  `/no_think` and `thinking: disabled` all still return a thinking block).
+  - Result: the aip-runtime trial on this task ran in **162 s total** (16 model turns at
+    4 to 13 s, 95 s of model time), reward 0, 15 tool calls. The solver found the
+    procedure with `aip search`, then fumbled the protocol (curl to nonexistent
+    endpoints, called "AipSearch" as a tool).
+  - **Open harness issue for S2:** that trial ended because Qwen's last reply was a
+    thinking block with no text or tool call. The ACP agent (bundled Claude Code
+    2.1.83 / agent SDK 0.2.83) treats that as the end of the turn; the current
+    `claude` CLI re-prompts ("Your previous response had no visible output"). Unfixed,
+    this ends trials early in every mode.
 - Check 5: the repo has no test suite and pytest isn't a dependency. `compileall` is clean,
   and ruff on the touched files reports only rule kinds the files already had (UP042,
   B008, UP045).
@@ -188,7 +208,7 @@ Notes (2026-10-09, on `zach-aip-skillbench`):
 ```sh
 OUT=runs/smoke-1-qwen35-9b-$(date +%F)
 uv run aip-skillbench run-matrix --config configs/campaign-1.yaml \
-  --model Qwen/Qwen3.5-9B:deepinfra --provider hf \
+  --model Qwen/Qwen3.5-9B:featherless-ai --provider hf \
   --agent-env MAX_THINKING_TOKENS=0 \
   --trials 1 --concurrency 3 --out "$OUT" --yes
 ```
@@ -213,7 +233,7 @@ mapping first as in S0.4), rerun, and note which model continues. Commit the not
 OUT=runs/pilot-5-qwen35-9b-$(date +%F)
 tmux new -s bench   # then inside:
 uv run aip-skillbench run-matrix --config configs/campaign-5.yaml \
-  --model Qwen/Qwen3.5-9B:deepinfra --provider hf \
+  --model Qwen/Qwen3.5-9B:featherless-ai --provider hf \
   --agent-env MAX_THINKING_TOKENS=0 \
   --trials 5 --concurrency 5 --out "$OUT" --yes
 ```

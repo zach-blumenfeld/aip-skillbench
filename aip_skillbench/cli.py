@@ -283,7 +283,7 @@ def eval(
     provider: Provider = typer.Option(
         Provider.anthropic, "--provider", case_sensitive=False,
         help="Where the solver's model calls go. `hf`: Hugging Face Inference Providers, with "
-             "HF_TOKEN from .env and the provider pinned in --model (e.g. Qwen/Qwen3.5-9B:deepinfra).",
+             "HF_TOKEN from .env and the provider pinned in --model (e.g. Qwen/Qwen3.5-9B:featherless-ai).",
     ),
     bake_agent: bool = typer.Option(
         True, "--bake-agent/--no-bake-agent",
