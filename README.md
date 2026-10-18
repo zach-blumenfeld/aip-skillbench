@@ -94,10 +94,11 @@ runtime dependencies by name from PyPI, since many task images have no git), sta
 to it with `aip publish`. The solver then finds the procedure with `aip search` and
 runs it with `aip run <name>`. `timing.json` records `aip_install`, `aip_server`, and
 `aip_publish`; any setup failure fails the trial rather than silently changing the
-condition. Scripts run by the server run as root; in `aip-spec` they run as the
-solver. Decision steps are answered by the solver at each pause; `--decision-model`
-(`aip-runtime` only; refused elsewhere) gives the server process, not the agent, a
-`TYPESAFE_API_KEY`. Both AIP modes seed a mode-specific `~/.claude/CLAUDE.md` memory in
+condition. Under aip 0.6a0 the server runs no scripts: the solver's `aip` client runs
+them as the solver, as in `aip-spec`. Decision steps are answered by the solver at each
+pause; `--decision-model` (`aip-runtime` only; refused elsewhere) puts `TYPESAFE_API_KEY`
+in the solver's environment, where the client resolves decisions; the server never
+holds a model key. Both AIP modes seed a mode-specific `~/.claude/CLAUDE.md` memory in
 the sandbox (texts side by side in `_benchflow_patch.NUDGE_MEMORY`); `human-curated`
 gets none, and `--no-aip-nudge` (`run-matrix` config key `aip_nudge: false`) is the
 ablation. `aip-runtime` mounts and publishes one procedure, so its pack must hold a

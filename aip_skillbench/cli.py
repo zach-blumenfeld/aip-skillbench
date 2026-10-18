@@ -255,13 +255,15 @@ def eval(
     jobs_dir: Path = typer.Option(None, help="Override jobs/ output dir."),
     decision_model: bool = typer.Option(
         False, "--decision-model/--no-decision-model",
-        help="aip-runtime only: give the in-container aip server TYPESAFE_API_KEY from .env so "
-             "decision steps are answered by the decision model. Off = the solver answers each pause.",
+        help="aip-runtime only: put TYPESAFE_API_KEY from .env in the solver's environment, where "
+             "the aip client answers decision steps with the decision model (the server holds no key). "
+             "Off = the solver answers each pause.",
     ),
     step_timeout: int = typer.Option(
         1800, "--step-timeout",
-        help="aip-runtime: seconds an execution step may run on the in-container server "
-             "before it is killed (AIP_STEP_TIMEOUT; 0 = no limit). Default 1800, the agent's own budget.",
+        help="aip-runtime: seconds an execution step may run before the aip client kills it "
+             "(the in-container server's AIP_STEP_TIMEOUT, sent with each step; 0 = no limit). "
+             "Default 1800, the agent's own budget.",
     ),
     aip_nudge: bool = typer.Option(
         True, "--aip-nudge/--no-aip-nudge",
@@ -349,21 +351,23 @@ def eval(
         env[PUBLISH_ENV] = str(packs[0])
         if aip_nudge:
             env[NUDGE_ENV] = mode.value
-        # The server's default per-step timeout. aip's built-in default is 60 s, which a
-        # correct but slow script exceeds on a 1-CPU task container (TLS took 73 s), while
-        # the same step has no limit when the solver runs it by hand in aip-spec. Give the
-        # protocol the same budget as the agent.
-        server_env: dict[str, str] = {"AIP_STEP_TIMEOUT": str(step_timeout)}
-        if decision_model:
-            key = _read_dotenv(ROOT / ".env").get("TYPESAFE_API_KEY") or os.environ.get("TYPESAFE_API_KEY")
-            if not key:
-                raise typer.BadParameter("--decision-model needs TYPESAFE_API_KEY in .env or the environment")
-            server_env["TYPESAFE_API_KEY"] = key
-        env[SERVER_EXTRA_ENV] = json.dumps(server_env)
+        # The server's default per-step timeout, which it sends with each execution step
+        # the client runs. aip's built-in default is 60 s, which a correct but slow script
+        # exceeds on a 1-CPU task container (TLS took 73 s), while the same step has no
+        # limit when the solver runs it by hand in aip-spec. Give the protocol the same
+        # budget as the agent.
+        env[SERVER_EXTRA_ENV] = json.dumps({"AIP_STEP_TIMEOUT": str(step_timeout)})
         extra = [
             "--skills-dir", str(runtime_skills),
             "--agent-env", f"AIP_SERVER={AIP_SERVER_URL}",
         ]
+        if decision_model:
+            # The aip client resolves decisions (aip 0.6a0), so the key goes where it runs:
+            # the solver's environment. benchflow keeps *KEY* names out of config.json.
+            key = _read_dotenv(ROOT / ".env").get("TYPESAFE_API_KEY") or os.environ.get("TYPESAFE_API_KEY")
+            if not key:
+                raise typer.BadParameter("--decision-model needs TYPESAFE_API_KEY in .env or the environment")
+            extra += ["--agent-env", f"TYPESAFE_API_KEY={key}"]
     else:
         raise typer.BadParameter(f"unknown mode: {mode}")
 
@@ -381,8 +385,8 @@ materials, SKILL.md with the verbatim runtime block and one fenced YAML procedur
 CLIs are on PATH), the line-by-line completeness check against the sources, and the
 functional test: write realistic start inputs to ./scratch/start.json (test inputs
 never go inside the pack) and run `aip run ./out/<skill-name> --input
-./scratch/start.json`, answering each pause with `aip resume <run-file> --input
-<answer.json>`, through to the end step. When ./inputs/environment/data/ exists it
+./scratch/start.json`, answering each pause with `aip resume <run-id> --input
+<answer.json>` (every pause prints its `run_id`), through to the end step. When ./inputs/environment/data/ exists it
 holds the input files the skill will be run on, with MANIFEST.md listing their real
 names and sizes. Unless the manifest says otherwise they are truncated to their first
 2 KB: enough to see the real format (header lines, delimiters, column order, cadence,
@@ -396,15 +400,20 @@ below). Everything you may read is under ./inputs/ and everything you write goes
 under ./out/ or ./scratch/; do not look anywhere else on this machine. Scripts run
 inside the task's container, so they must work with the packages that container
 provides (see ./inputs/environment/Dockerfile when present) or bootstrap their own
-environment; do not assume extra packages. How `aip run` executes a script: it runs
-`<python> <script>` with cwd set to the script's folder and one JSON object on stdin
-({"currentState", "assets", "expects"}); stdout must be one JSON object. In the
-container that python has the container's system packages; in a local `aip run`
-here it is the aip CLI's own Python 3.14, which lacks the task's packages. If the
-functional test needs them: `uv venv --python 3.14 ./scratch/venv && uv pip install
+environment; do not assume extra packages. The pack's `requires` block names the
+interpreter with a minimum version the container's `python3` meets, every package the
+scripts import, and any other tool they call; the client checks it before the first
+script and stops naming what is missing. Every execution and client_task step
+declares its `outputs`. How `aip run` executes a script: it runs `<python> <script>`
+(or the step's `command`) with cwd set to the script's folder and one JSON object on
+stdin ({"state": <the step's declared inputs only>, "assets", "expects"}); stdout must
+be one JSON object holding exactly the step's declared `outputs`. In the container
+that python has the container's system packages; in a local `aip run` here it is the
+aip CLI's own Python 3.14, which lacks the task's packages, so the `requires` check
+fails until they are visible. If the functional test needs them: `uv venv --python 3.14 ./scratch/venv && uv pip install
 --python ./scratch/venv/bin/python <packages>`, then prefix the run with
 `PYTHONPATH="$(./scratch/venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')" aip run ...`
-(scripts inherit it). That is all you need to know about the aip installation; do not
+(the `requires` check and the scripts inherit it; do the same for `aip resume`). That is all you need to know about the aip installation; do not
 read its source.\
 """
 
@@ -780,8 +789,8 @@ def run_matrix_cmd(
     shuffle: bool = typer.Option(False, "--shuffle", help="Randomize cell execution order."),
     decision_model: Optional[bool] = typer.Option(
         None, "--decision-model/--no-decision-model",
-        help="aip-runtime only: give the in-container server TYPESAFE_API_KEY so decision steps "
-             "are answered by the decision model. Config key `decision_model`. Default off.",
+        help="aip-runtime only: put TYPESAFE_API_KEY in the solver's environment so the aip client "
+             "answers decision steps with the decision model. Config key `decision_model`. Default off.",
     ),
     aip_nudge: Optional[bool] = typer.Option(
         None, "--aip-nudge/--no-aip-nudge",

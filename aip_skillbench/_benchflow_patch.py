@@ -23,10 +23,13 @@ CLI entry point (and the `bench` subprocess via `_bench_launcher`) gets them.
    - `AIP_SKILLBENCH_SERVER=1`: starts `aip server` (filesystem backend, catalog
      at /opt/aip/catalog, 127.0.0.1:8000, no token needed on localhost) detached
      with `setsid nohup`, so it outlives the `docker compose exec` that started
-     it, and waits up to 60 s for /catalog. Timing key `aip_server`. Scripts run
-     by the server run as root (the solver is the sandbox user).
-     `AIP_SKILLBENCH_SERVER_ENV` (JSON object) is extra environment for the
-     server process only, e.g. `TYPESAFE_API_KEY` under `--decision-model`.
+     it, and waits up to 60 s for /catalog. Timing key `aip_server`. Under aip
+     0.6a0 the server runs no scripts and holds no model key: the solver's `aip`
+     client runs every execution step as the sandbox user, from its cache under
+     the user's `~/.aip/`, and resolves decisions (with `TYPESAFE_API_KEY` in the
+     agent's environment under `--decision-model`). `AIP_SKILLBENCH_SERVER_ENV`
+     (JSON object) is extra environment for the server process only
+     (`AIP_STEP_TIMEOUT`); a `TYPESAFE_API_KEY` in it is refused.
    - `AIP_SKILLBENCH_PUBLISH` (host path of one skill folder): uploaded to
      /opt/aip/packs/<name> and published with `aip publish`; the printed
      `name@revision` goes to the log. Timing key `aip_publish`.
@@ -223,6 +226,11 @@ async def _install_aip(env: Any, wheels: list[Path]) -> None:
 
 
 async def _start_aip_server(env: Any, server_env: dict[str, str]) -> None:
+    if "TYPESAFE_API_KEY" in server_env:
+        raise RuntimeError(
+            f"{SERVER_EXTRA_ENV} carries TYPESAFE_API_KEY; the aip 0.6a0 server holds no model key "
+            "(the client resolves decisions: give the key to the agent's environment)"
+        )
     out = await _exec_or_raise(
         env, "aip server start", server_script(server_env), timeout_sec=120
     )

@@ -24,10 +24,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 AIP_SRC_DIR = ROOT / ".claude" / "skills-src" / "aip"
 AIP_REMOTE = "git@github.com:zach-blumenfeld/aip.git"
-AIP_DEFAULT_REF = "aip-0.5a0"
+AIP_DEFAULT_REF = "v0.6a0"
 AIP_SPEC_DIR = ROOT / ".claude" / "skills-src" / "aip-spec"
 AIP_SPEC_REMOTE = "git@github.com:zach-blumenfeld/aip-spec.git"
-AIP_SPEC_DEFAULT_REF = "v0.5a1"
+AIP_SPEC_DEFAULT_REF = "v0.6a0"
 AIP_BUILD_DIR = ROOT / "build" / "aip"
 # `aip skill install --path` writes aip/ (authoring skill) and aip-runtime/ here.
 HOST_SKILLS_DIR = ROOT / "build" / "skills"
@@ -44,8 +44,9 @@ AIP_SERVER_URL = f"http://127.0.0.1:{AIP_SERVER_PORT}"
 WHEEL_ENV = "AIP_SKILLBENCH_WHEELS"
 # "1" to start `aip server` in the container (needs WHEEL_ENV).
 SERVER_ENV = "AIP_SKILLBENCH_SERVER"
-# JSON object of extra environment for the server process only (e.g. TYPESAFE_API_KEY
-# under `--decision-model`); never given to the agent.
+# JSON object of extra environment for the server process only (AIP_STEP_TIMEOUT). Under
+# 0.6a0 the server holds no model key: `--decision-model` gives TYPESAFE_API_KEY to the
+# solver's environment, where the `aip` client resolves decisions.
 SERVER_EXTRA_ENV = "AIP_SKILLBENCH_SERVER_ENV"
 # Host path of one skill folder to publish to that server (needs SERVER_ENV).
 PUBLISH_ENV = "AIP_SKILLBENCH_PUBLISH"

@@ -150,7 +150,7 @@ Both AIP modes get a short, directive `~/.claude/CLAUDE.md` (written to `/root/.
 
 ### Decision steps
 
-The decision model (TypeSafe) is off in every mode: decision steps pause and the solver answers them. `--decision-model` is accepted only with `aip-runtime`, where it puts `TYPESAFE_API_KEY` from `.env` into the **server** process's environment (via `AIP_SKILLBENCH_SERVER_ENV`), never the agent's. `eval` refuses it for any other mode; `run-matrix` passes it to `aip-runtime` cells only.
+The decision model (TypeSafe) is off in every mode: decision steps pause and the solver answers them. `--decision-model` is accepted only with `aip-runtime`, where it puts `TYPESAFE_API_KEY` from `.env` into the **solver's** environment (`--agent-env`): under aip 0.6a0 the `aip` client resolves decisions and the server holds no model key (the patch refuses one in `AIP_SKILLBENCH_SERVER_ENV`). benchflow keeps the key out of the trial's `config.json`. `eval` refuses it for any other mode; `run-matrix` passes it to `aip-runtime` cells only.
 
 ---
 
@@ -202,12 +202,13 @@ Container paths:
 | `/home/agent/.claude/skills/aip-runtime/` | `build/aip-runtime-skill/` (from `aip runtime --skill`) | **yes** — the protocol directions |
 | `/home/agent/.claude/CLAUDE.md` | the `aip-runtime` memory file | yes, loaded as user memory |
 | `/opt/aip/` | venv with `aip` and `aip-spec`; `/usr/local/bin/aip` symlinks into it | yes, via the CLI |
-| `/opt/aip/packs/<skill>/` | the published pack's upload | no — the server runs it |
+| `/opt/aip/packs/<skill>/` | the published pack's upload | no — the server serves it |
+| `/home/agent/.aip/` | the client's run files and its cache of the revision's `scripts/` and `assets/` | yes, via the CLI |
 | `/opt/aip/catalog/` | the server's filesystem backend | no |
 | `/var/log/aip-server.log` | server log | no (useful when debugging) |
 | `/app/skills/<curated-skill>/` | benchflow's task-fixtures upload of the curated originals | no — unused in this mode |
 
-**Root vs agent.** The server is a root process, so execution-step scripts run as root in this mode, while in `aip-spec` they run as the solver. That is acceptable for these tasks: outputs land under `/root/`, which the verifier reads.
+**Root vs agent.** The server is a root process, but under aip 0.6a0 it runs no scripts: the solver's `aip` client runs every execution step as the solver, from its cache, as in `aip-spec`. Outputs land under `/root/`, which the verifier reads.
 
 Audit signals (`TRIAL=$(ls -dt jobs/<task>-aip-runtime-<model>/*/<task>__* | head -1)`):
 
