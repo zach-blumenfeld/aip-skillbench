@@ -24,10 +24,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 AIP_SRC_DIR = ROOT / ".claude" / "skills-src" / "aip"
 AIP_REMOTE = "git@github.com:zach-blumenfeld/aip.git"
-AIP_DEFAULT_REF = "v0.6a0"
+AIP_DEFAULT_REF = "v0.6a1"
 AIP_SPEC_DIR = ROOT / ".claude" / "skills-src" / "aip-spec"
 AIP_SPEC_REMOTE = "git@github.com:zach-blumenfeld/aip-spec.git"
-AIP_SPEC_DEFAULT_REF = "v0.6a0"
+AIP_SPEC_DEFAULT_REF = "v0.6a1"
 AIP_BUILD_DIR = ROOT / "build" / "aip"
 # `aip skill install --path` writes aip/ (authoring skill) and aip-runtime/ here.
 HOST_SKILLS_DIR = ROOT / "build" / "skills"
