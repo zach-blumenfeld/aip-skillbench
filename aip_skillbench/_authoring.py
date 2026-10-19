@@ -53,6 +53,8 @@ _ALLOWED_PREFIXES = (
     "/usr/", "/bin/", "/opt/", "/etc/", "/dev/", "/proc/", "/Library/", "/System/",
     str(Path.home() / ".cache") + "/", str(Path.home() / ".local") + "/",
     str(Path.home() / ".claude") + "/",
+    # The aip client's own run files (0.6a0 keeps them under ~/.aip unless AIP_HOME moves them).
+    str(Path.home() / ".aip") + "/",
 )
 # Anything mentioning these is a violation regardless of prefix.
 _FORBIDDEN_FRAGMENTS = ("vendor/skillsbench", "/tests/", "/solution/", "test_outputs", "solve.sh")
@@ -163,6 +165,7 @@ def run_author(ws: Path, prompt: str, model: str, api_key: str | None) -> tuple[
     env = os.environ.copy()
     if api_key:
         env["ANTHROPIC_API_KEY"] = api_key
+    env["AIP_HOME"] = str(ws / "scratch" / "aip-home")  # run files stay inside the workspace
     with open(transcript, "w") as fh:
         proc = subprocess.run(cmd, cwd=ws, env=env, stdout=fh, stderr=subprocess.PIPE, text=True)
     if proc.stderr.strip():
