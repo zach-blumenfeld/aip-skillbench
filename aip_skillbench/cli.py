@@ -520,7 +520,9 @@ def _convert_one(
         "--task", task, "--variant", v.name,
         "--author-model", author_model,
     ]
-    if force:
+    # A pack dir that exists here is either forced or failed its gate (valid ones were
+    # skipped by the caller); convert refuses to overwrite without --force either way.
+    if force or v.pack_root(task).exists():
         cmd.append("--force")
     if stage_data != "full":
         cmd += ["--stage-data", stage_data]
