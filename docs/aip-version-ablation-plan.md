@@ -77,7 +77,7 @@ Proof:
     uv run python -c "from aip_skillbench._variants import VARIANTS; print(sorted(VARIANTS))"
     git status --short generated-skills | head  # only deletions, or empty after git rm
 
-Done: 2026-10-20, uncommitted. `bootstrap --force` built all three: `ls build/` → aip-0.3a3
+Done: 2026-10-20, commit bb71814. `bootstrap --force` built all three: `ls build/` → aip-0.3a3
 aip-0.6a1 dist; REFS.json holds aip-0.6a1 (aip 7d0655e, aip-spec 9edbf48, format 0.6a1),
 aip-0.3a3 (aip 2c20a02, format 0.3a3), dist (distillation @ acb061d, clean); `aip-spec
 --version` 0.6a1; wheels aip_spec-0.6a1 and aip-0.6a1; `build/aip-0.3a3/skill/aip/scripts/`
@@ -151,7 +151,7 @@ Proof (one task, three variants, about $6-12):
     grep -h "aip" generated-skills/exoplanet-detection-period/aip-0.3a3/*/SKILL.md | head -3
     grep -h "aip-version" generated-skills/exoplanet-detection-period/aip-0.6a1/*/SKILL.md
 
-Done: 2026-10-20, uncommitted. `batch-convert --task exoplanet-detection-period --variant
+Done: 2026-10-20, commit bb71814. `batch-convert --task exoplanet-detection-period --variant
 dist --variant aip-0.3a3 --variant aip-0.6a1 --concurrency 3 --force --yes`: 3 succeeded in
 38.8 min wall clock. Per variant (meta.json / audit.json): stage_instruction=True,
 stage_data=full, author claude-opus-5-5, claude_exit=0, audit ok, 0 violations;
@@ -216,7 +216,7 @@ Proof (spends nothing):
     # dry listing: 700 cells, five scenario columns, no spend (needs a --dry-run on run-matrix, add it)
     uv run aip-skillbench run-matrix --config configs/campaign-ablation.yaml --dry-run | tail -3
 
-Done: 2026-10-20, uncommitted (done ahead of S2's proof, which waits on three Opus compiles).
+Done: 2026-10-20, commit bb71814 (done ahead of S2's proof, which waits on three Opus compiles).
 `eval --help` lists `--mode [noskill|human-curated|selfgen-skill-creator|skill|aip-runtime]`,
 `--variant`, `--nudge/--no-nudge`, `--aip-nudge/--no-aip-nudge`. Refusals: `--variant` with
 noskill; `--mode skill` without a variant; `aip-runtime --variant dist` ("has no runtime");
