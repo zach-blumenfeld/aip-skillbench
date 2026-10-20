@@ -9,14 +9,17 @@ Runbook for the evaluation conditions defined in the [README](README.md). For ba
 | `noskill` | — | — | — | nothing |
 | `human-curated` | human | task domain expertise (no file) | offline | committed `vendor/skillsbench/tasks/<task>/environment/skills/` |
 | `selfgen-skill-creator` | same model as solver | `vendor/skillsbench/tasks/<task>/instruction.md` | per trial (in-sandbox) | freshly-generated skill (sandbox-local, ephemeral) |
-| `aip-from-instruction` | Opus | `vendor/skillsbench/tasks/<task>/instruction.md` | once, locked | committed `generated-skills/<task>/aip-from-instruction/` mounted as skills |
-| `aip-spec` | Opus | the task's curated skills + Dockerfile | once, locked | committed `generated-skills/<task>/aip-from-curated/<skill>/` mounted as a skill, plus the `aip-spec` memory file |
-| `aip-runtime` | Opus | same pack as `aip-spec` | once, locked | the same pack published to an in-container `aip server`; only the generic `aip-runtime` skill mounted; the `aip-runtime` memory file |
-| `model-dist` | — | — | — | not implemented (exits 2); see `prompts/modes-plan.md` Appendix A |
+| `skill --variant V` | Opus, under variant V's authoring skill | the task's curated skills, `instruction.md`, Dockerfile, environment inputs | once, locked | committed `generated-skills/<task>/V/<skill>/` mounted as a skill; `--nudge` adds a memory file (off by default) |
+| `aip-runtime --variant V` | Opus, under V (`aip-0.6a1`) | same pack as `skill --variant V` | once, locked | the pack published to an in-container `aip server`; only the generic `aip-runtime` skill mounted; the `aip-runtime` memory file (on by default) |
 
-`aip-from-curated` is accepted as a deprecated alias of `aip-runtime`: `eval` prints a note and proceeds as `aip-runtime`. It remains the pack directory name.
+Variants (`aip_skillbench/_variants.py`): `dist` (the distillation meta-skill: a plain
+Agent Skill, no AIP), `aip-0.3a3` (the paper's AIP format), `aip-0.6a1` (the current AIP
+format; the only one with a runtime). The modes `aip-spec`, `aip-from-instruction`,
+`aip-from-curated`, and `model-dist` were removed on 2026-10-20: `aip-spec` is `skill
+--variant aip-0.6a1`, and campaign configs name scenarios (`{name, mode, variant, nudge}`)
+rather than modes, see [docs/campaigns.md](docs/campaigns.md).
 
-Every mode runs the same solver call shape: `aip-skillbench eval --task <T> --model <M> --mode <name>`. The differences are the skill artifacts mounted into the container, what else the container is given, and when/by-whom the skills were authored.
+Every mode runs the same solver call shape: `aip-skillbench eval --task <T> --model <M> --mode <name> [--variant V]`. The differences are the skill artifacts mounted into the container, what else the container is given, and when/by-whom the skills were authored.
 
 ## Validation status (3d-scan-calc / claude-haiku-4-5, n=1, AIP 0.3-era packs)
 
@@ -86,120 +89,107 @@ Skill-creator source is pinned: `aip-skillbench eval --mode selfgen-skill-creato
 
 ---
 
-## `aip-from-instruction`
+## The compiled pack (shared by `skill` and `aip-runtime`)
 
-Opus authors an AIP skill **once** from `instruction.md` alone, locked, committed; every trial mounts the same skill. Authoring runs offline on the host via `claude -p`; no Docker, no env access during authoring.
-
-Two commands — author once, eval many:
-
-```bash
-uv run aip-skillbench convert --task 3d-scan-calc --from instruction
-uv run aip-skillbench eval --task 3d-scan-calc --model claude-haiku-4-5 --mode aip-from-instruction
-```
-
-Output (committed to git): `generated-skills/<task>/aip-from-instruction/<skill-name>/`.
-
-Notable difference from the curated-side pack: the skill is authored from scratch, so Opus picks its own `<skill-name>` (e.g. `stl-mass-from-scan` for 3d-scan-calc, not the curated `mesh-analysis`), and any helper scripts are written by Opus rather than copied from a human-authored skill.
-
-### Reference run
-
-First validated trial:
-
-- Task: `3d-scan-calc`
-- Model: `claude-haiku-4-5`
-- Agent: `claude-agent-acp`
-- Trial: `3d-scan-calc__fdaf7b47` (run `2026-05-26__17-44-58`)
-- Authored skill: `stl-mass-from-scan` (Opus-chosen name; includes its own stdlib-only `scripts/compute_mass.py` and a `references/binary_stl_format.md` explainer)
-- Reward: **1.0** (pass)
-- Tool calls: 9 (`Skill` launch → `Read` density table → `Terminal` STL size sanity-check → `Terminal` run `compute_mass.py --verbose` → `Read` the script → `Read` density again → …)
-- Wall clock: 84.4 s (env 6.1 + agent setup 0.6 + agent execution 60.0 + verifier 2.5)
-- Skill activated via `Skill` tool: yes — `Launching skill: stl-mass-from-scan`
-
-Comparison to the old `aip-from-curated` reference run on the same (task, model): both pass; this one used 9 tool calls vs 4, primarily because the Opus-authored skill ships a runnable script that the agent invoked directly and then sanity-checked, rather than writing its own glue code.
-
----
-
-## The curated-side AIP pack (shared by `aip-spec` and `aip-runtime`)
-
-Opus compiles all of a task's curated skills into **one** AIP procedure (`convert --from curated --single`, the default for these modes): the verbatim 0.5a1 runtime block plus a schema-validated YAML procedure, `metadata.aip-version` frontmatter, the originals preserved under `source/`, and supporting scripts reproduced or adapted. Locked, committed, and gated by `aip-spec validate` (a `runtime_block_outdated` warning counts as a failure, so no campaign mixes block versions). Both modes use the same pack bytes.
+Opus compiles all of a task's curated skills into **one** pack per variant
+(`convert --task T --variant V`): the originals preserved under `source/` with a
+`source/README.md` drop log, supporting scripts reproduced or adapted, and a `SKILL.md`
+in the variant's format (`dist`: a plain Agent Skill of components; `aip-0.3a3`: a
+schema-validated YAML body; `aip-0.6a1`: the verbatim runtime block plus a typed YAML
+procedure with `metadata.aip-version`). Locked, committed, and gated by the variant's
+validator (`aip-spec validate` for `aip-0.6a1`, strict on `runtime_block_outdated`; the
+0.3a3 skill's `scripts/validate.py`; the harness's own `dist_gate`). `skill` and
+`aip-runtime` on the same variant use the same pack bytes.
 
 ```bash
-# Author once (one Opus call, ~$0.30-1, ~1-2 min)
-uv run aip-skillbench convert --task 3d-scan-calc --from curated --single
+# Author once per variant (one Opus call, ~$4, ~10-15 min)
+uv run aip-skillbench convert --task 3d-scan-calc --variant aip-0.6a1
 ```
 
-Authoring is sandboxed: the session sees only the curated skills and Dockerfile under a throwaway `./inputs/`, and its transcript is audited for any access outside the workspace (see README "Sandboxed authoring"); the record lives in `generated-skills/<task>/_authoring/`.
+Authoring is sandboxed: the session sees only the curated skills, `instruction.md`, the
+Dockerfile, and the environment inputs under a throwaway `./inputs/`, and its transcript
+is audited for any access outside the workspace (see README "Sandboxed authoring"); the
+record lives in `generated-skills/<task>/_authoring/<variant>/single/`.
 
 Host layout (committed):
 
 ```
 generated-skills/3d-scan-calc/
-├── aip-from-curated/                  # the pack dir: skill folders only
+├── aip-0.6a1/                         # the pack dir for one variant: skill folders only
 │   └── stl-mass-calc/
 │       ├── SKILL.md                   # frontmatter + runtime block + fenced YAML procedure
 │       ├── scripts/…                  # execution-step scripts
 │       └── source/…                   # the curated originals
-└── _authoring/curated/single/         # prompt, transcript, audit.json, meta.json
+├── dist/…  aip-0.3a3/…                # the other variants' packs
+└── _authoring/aip-0.6a1/single/       # prompt, transcript, audit.json, meta.json
 ```
 
-`eval` validates the pack before every AIP trial and `run-matrix` validates every pack before a campaign spends money.
+`eval` runs the variant's gate before every `skill` / `aip-runtime` trial and
+`run-matrix` runs it on every (task, variant) a campaign needs before spending money.
 
 ### Memory files
 
-Both AIP modes get a short, directive `~/.claude/CLAUDE.md` (written to `/root/.claude/CLAUDE.md` before the sandbox user exists; benchflow copies it into `/home/agent/.claude/`). The two texts live side by side in `aip_skillbench/_benchflow_patch.py` (`NUDGE_MEMORY`) and are held constant across campaigns. `human-curated` gets none. `--no-aip-nudge` (or `aip_nudge: false` in a `run-matrix` config) is the explicit ablation. The patch logs `aip memory (<mode>) written` and `timing.json` carries `memory_file` (seconds).
+Two texts live side by side in `aip_skillbench/_benchflow_patch.py` (`NUDGE_MEMORY`), written
+to `/root/.claude/CLAUDE.md` before the sandbox user exists (benchflow copies it into
+`/home/agent/.claude/`) and as `<cwd>/CLAUDE.md`. `aip-runtime` writes its text by default
+(nothing task-specific is mounted, so the solver is told to `aip search` first;
+`--no-aip-nudge` is the ablation). `skill` writes none by default: the mounted pack is
+activated by its own description like any Agent Skill; `--nudge` is the knob. The patch
+logs `aip memory (<mode>) written` and `timing.json` carries `memory_file` (seconds).
 
 ### Decision steps
 
-The decision model (TypeSafe) is off in every mode: decision steps pause and the solver answers them. `--decision-model` is accepted only with `aip-runtime`, where it puts `TYPESAFE_API_KEY` from `.env` into the **solver's** environment (`--agent-env`): under aip 0.6a0 the `aip` client resolves decisions and the server holds no model key (the patch refuses one in `AIP_SKILLBENCH_SERVER_ENV`). benchflow keeps the key out of the trial's `config.json`. `eval` refuses it for any other mode; `run-matrix` passes it to `aip-runtime` cells only.
+The decision model (TypeSafe) is off in every mode: decision steps pause and the solver answers them. `--decision-model` is accepted only with `aip-runtime`, where it puts `TYPESAFE_API_KEY` from `.env` into the **solver's** environment (`--agent-env`): the `aip` client resolves decisions and the server holds no model key (the patch refuses one in `AIP_SKILLBENCH_SERVER_ENV`). benchflow keeps the key out of the trial's `config.json`. `eval` refuses it for any other mode; `run-matrix` passes it to `aip-runtime` cells only.
 
 ---
 
-## `aip-spec`
+## `skill`
 
-The Spec alone. The pack is mounted as a skill; its 0.5a1 runtime block tells the solver to execute the graph itself (start step, each execution step's script with the JSON state on stdin, follow `inputs_to` and routers, answer decisions). No `aip` CLI, no server.
+The pack as a skill. Mounted, nothing installed. An AIP pack's runtime block tells the solver to execute the graph itself (start step, each execution step's script with the JSON state on stdin, follow `inputs_to` and routers, answer decisions); a `dist` pack is followed like any skill. No `aip` CLI, no server.
 
 ```bash
-uv run aip-skillbench eval --task 3d-scan-calc --model claude-haiku-4-5 --mode aip-spec
+uv run aip-skillbench eval --task 3d-scan-calc --model claude-haiku-5-5 --mode skill --variant aip-0.6a1
+uv run aip-skillbench eval --task 3d-scan-calc --model claude-haiku-5-5 --mode skill --variant dist
 ```
 
-What `eval` sets: `--skills-dir generated-skills/<task>/aip-from-curated`, and `AIP_SKILLBENCH_NUDGE=aip-spec` (unless `--no-aip-nudge`).
+What `eval` sets: `--skills-dir generated-skills/<task>/<variant>`, and `AIP_SKILLBENCH_NUDGE=skill` only with `--nudge`.
 
 Container paths:
 
 | Container path | Origin | Used by agent? |
 |---|---|---|
-| `/home/agent/.claude/skills/<skill>/` | symlink to benchflow's `--skills-dir` upload | **yes** — the procedure the solver executes |
-| `/home/agent/.claude/CLAUDE.md` | the `aip-spec` memory file | yes, loaded as user memory |
+| `/home/agent/.claude/skills/<skill>/` | symlink to benchflow's `--skills-dir` upload | **yes** — the skill the solver follows |
+| `/home/agent/.claude/CLAUDE.md` | the `skill` memory file, only with `--nudge` | yes, loaded as user memory |
 | `/app/skills/<curated-skill>/` | benchflow's task-fixtures upload of the curated originals | no — unused in this mode |
 
 Scripts run as the solver (the `agent` sandbox user).
 
-Audit signals (`TRIAL=$(ls -dt jobs/<task>-aip-spec-<model>/*/<task>__* | head -1)`):
+Audit signals (`TRIAL=$(ls -dt jobs/<task>-skill-<variant>-<model>/*/<task>__* | head -1)`):
 
 ```bash
 grep '"Launching skill' $TRIAL/agent/acp_trajectory.jsonl          # the pack's skill name
 grep -c '"aip ' $TRIAL/agent/acp_trajectory.jsonl                 # 0: no aip CLI in this mode
-grep -o 'currentState' $TRIAL/agent/acp_trajectory.jsonl | wc -l  # scripts fed JSON state on stdin
-python3 -c "import json; t=json.load(open('$TRIAL/timing.json')); print(sorted(t))"   # no aip_* keys
+grep -o '"state"' $TRIAL/agent/acp_trajectory.jsonl | wc -l       # aip-0.6a1: scripts fed JSON state on stdin
+python3 -c "import json; t=json.load(open('$TRIAL/timing.json')); print(sorted(t))"   # no aip_* keys; memory_file only with --nudge
 ```
 
 ---
 
 ## `aip-runtime`
 
-The Protocol. Nothing task-specific is mounted. Before the agent is installed, the benchflow patch (as root) installs the `aip-spec` and `aip` wheels from `build/aip/` into `/opt/aip`, starts `aip server` (filesystem backend) on `127.0.0.1:8000`, and publishes the pack to it. The solver gets only the generic `aip-runtime` skill and `AIP_SERVER`, and is expected to `aip search` with the task's words, `aip info` the match, `aip run <name> --input start.json`, and answer each pause with `aip resume`.
+The Protocol. Nothing task-specific is mounted. Before the agent is installed, the benchflow patch (as root) installs the variant's `aip-spec` and `aip` wheels from `build/<variant>/wheels/` into `/opt/aip`, starts `aip server` (filesystem backend) on `127.0.0.1:8000`, and publishes the pack to it. The solver gets only the generic `aip-runtime` skill and `AIP_SERVER`, and is expected to `aip search` with the task's words, `aip info` the match, `aip run <name> --input start.json`, and answer each pause with `aip resume`.
 
 ```bash
-uv run aip-skillbench eval --task 3d-scan-calc --model claude-haiku-4-5 --mode aip-runtime
+uv run aip-skillbench eval --task 3d-scan-calc --model claude-haiku-5-5 --mode aip-runtime --variant aip-0.6a1
 ```
 
-What `eval` sets: `--skills-dir build/aip-runtime-skill` (only `aip-runtime/SKILL.md`), `--agent-env AIP_SERVER=http://127.0.0.1:8000`, and for the patch `AIP_SKILLBENCH_WHEELS`, `AIP_SKILLBENCH_SERVER=1`, `AIP_SKILLBENCH_PUBLISH=<the one skill folder>`, `AIP_SKILLBENCH_NUDGE=aip-runtime` (unless `--no-aip-nudge`). The pack dir must hold exactly one skill folder (`--single`); `eval` refuses otherwise.
+What `eval` sets: `--skills-dir build/<variant>/aip-runtime-skill` (only `aip-runtime/SKILL.md`), `--agent-env AIP_SERVER=http://127.0.0.1:8000`, and for the patch `AIP_SKILLBENCH_WHEELS`, `AIP_SKILLBENCH_SERVER=1`, `AIP_SKILLBENCH_PUBLISH=<the one skill folder>`, `AIP_SKILLBENCH_NUDGE=aip-runtime` (unless `--no-aip-nudge`). The pack dir must hold exactly one skill folder; `eval` refuses otherwise, and refuses a variant without a runtime (`dist`, `aip-0.3a3`).
 
 Container paths:
 
 | Container path | Origin | Used by agent? |
 |---|---|---|
-| `/home/agent/.claude/skills/aip-runtime/` | `build/aip-runtime-skill/` (from `aip runtime --skill`) | **yes** — the protocol directions |
+| `/home/agent/.claude/skills/aip-runtime/` | `build/<variant>/aip-runtime-skill/` (from `aip runtime --skill`) | **yes** — the protocol directions |
 | `/home/agent/.claude/CLAUDE.md` | the `aip-runtime` memory file | yes, loaded as user memory |
 | `/opt/aip/` | venv with `aip` and `aip-spec`; `/usr/local/bin/aip` symlinks into it | yes, via the CLI |
 | `/opt/aip/packs/<skill>/` | the published pack's upload | no — the server serves it |
@@ -208,9 +198,9 @@ Container paths:
 | `/var/log/aip-server.log` | server log | no (useful when debugging) |
 | `/app/skills/<curated-skill>/` | benchflow's task-fixtures upload of the curated originals | no — unused in this mode |
 
-**Root vs agent.** The server is a root process, but under aip 0.6a0 it runs no scripts: the solver's `aip` client runs every execution step as the solver, from its cache, as in `aip-spec`. Outputs land under `/root/`, which the verifier reads.
+**Root vs agent.** The server is a root process, but it runs no scripts: the solver's `aip` client runs every execution step as the solver, from its cache, as in `skill` mode. Outputs land under `/root/`, which the verifier reads.
 
-Audit signals (`TRIAL=$(ls -dt jobs/<task>-aip-runtime-<model>/*/<task>__* | head -1)`):
+Audit signals (`TRIAL=$(ls -dt jobs/<task>-aip-runtime-<variant>-<model>/*/<task>__* | head -1)`):
 
 ```bash
 grep '"Launching skill' $TRIAL/agent/acp_trajectory.jsonl                 # aip-runtime, not a task skill
@@ -223,18 +213,12 @@ python3 -c "import json; t=json.load(open('$TRIAL/timing.json')); print({k: t[k]
 
 ---
 
-## `model-dist`
-
-Placeholder for the "compile to code without the Spec" ablation. `eval --mode model-dist` exits 2 with "not implemented; see prompts/modes-plan.md Appendix A", and `run-matrix` refuses it up front.
-
----
-
 ## Where the results are
 
 Each `eval` call writes one trial dir:
 
 ```
-jobs/<task>-<mode>-<model>/
+jobs/<task>-<mode>[-<variant>]-<model>/
 └── <timestamp>/                       # one launch
     └── <task>__<8-hex>/               # one trial
         ├── result.json                # rewards, timing, n_tool_calls, model, scenes
@@ -245,5 +229,5 @@ jobs/<task>-<mode>-<model>/
 ```
 
 ```bash
-uv run aip-skillbench reward jobs/3d-scan-calc-aip-runtime-claude-haiku-4-5/<timestamp>/
+uv run aip-skillbench reward jobs/3d-scan-calc-aip-runtime-aip-0.6a1-claude-haiku-5-5/<timestamp>/
 ```

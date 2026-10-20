@@ -1,22 +1,27 @@
-# Campaigns: the three AIP 0.5a1 modes at 1, 5, 10, or 27 tasks
+# Campaigns: a task collection under a set of scenarios
 
-A campaign runs every task in a collection under three modes (`human-curated`,
-`aip-spec`, `aip-runtime`; see [skill-modes.md](../skill-modes.md)) with Haiku 4.5 as
-the solver, 5 trials per (task, mode). The AIP packs are compiled once per task with Opus
-and committed under `generated-skills/<task>/aip-from-curated/`; `aip-spec` and
-`aip-runtime` use the same pack bytes.
+A campaign runs every task in a collection under each of its scenarios (a solver mode
+plus, for `skill` and `aip-runtime`, the compile variant whose pack the container gets
+and whether the memory nudge is written; see [skill-modes.md](../skill-modes.md)), with
+one solver model and N trials per (task, scenario). Packs are compiled once per task per
+variant with Opus and committed under `generated-skills/<task>/<variant>/`; two
+scenarios on the same variant use the same pack bytes.
 
 | File | What it is |
 |---|---|
-| `configs/campaign-{1,5,10,27}.yaml` | the collection's tasks plus the campaign settings |
-| `scripts/compile-collection.sh N` | compile (author) the packs a collection still needs, then check them |
+| `configs/campaign-{1,5,10,27,ablation}.yaml` | the collection's tasks plus the campaign settings |
+| `scripts/compile-collection.sh N --variant V` | compile (author) the V packs a collection still needs, then check them |
 | `scripts/run-campaign.sh N` | run the campaign with `run-matrix` and print its summary |
-| `scripts/campaign.py` | the helper both scripts call (task lists, validation, report) |
+| `scripts/campaign.py` | the helper both scripts call (task lists, gate sweep, report) |
 
-Every config uses `models: [claude-haiku-4-5]`, `modes: [human-curated, aip-spec,
-aip-runtime]`, `trials: 5`, `concurrency: 10`, `decision_model: false` (decision steps
-pause and the solver answers), `aip_nudge: true` (the mode's memory file is written in
-AIP cells), `agent: claude-agent-acp`, `sandbox: docker`.
+The current campaign is `ablation` (`configs/campaign-ablation.yaml`): the five
+scenarios of [aip-version-ablation-benchmark.md](aip-version-ablation-benchmark.md)
+(`human`, `dist`, `aip-v03`, `aip-spec`, `aip-rt`) on 28 tasks, `claude-haiku-5-5` with
+`agent_env: [MAX_THINKING_TOKENS=0]`, `trials: 5`, `concurrency: 10`, `decision_model:
+false` (decision steps pause and the solver answers): 700 cells. The older collections
+(1, 5, 10, 27) still list `modes: [human-curated, aip-spec, aip-runtime]` from the 0.5a1
+campaigns; `aip-spec` is no longer a mode (it is `skill` on variant `aip-0.6a1`), so they
+need their `modes:` rewritten as `scenarios:` before they run again.
 
 ## The collections
 
@@ -48,6 +53,11 @@ task's own `task.toml`; "skills" is the number of curated skills under
 | crystallographic-wyckoff-position-analysis | medium | 2 |
 | dialogue-parser | easy | 1 |
 | powerlifting-coef-calc | easy | 3 |
+
+**campaign-ablation** (28 tasks): campaign-27 with four swaps, each in its difficulty and
+category (reasons in the spec): fix-build-agentops for fix-build-google-auto,
+software-dependency-audit for suricata-custom-exfil, exam-block-sequencing for
+civ6-adjacency-optimizer, jpg-ocr-stat for enterprise-information-search.
 
 **campaign-27** (28 tasks; the name is historical: the list grew by one): campaign-10 plus
 
@@ -92,9 +102,9 @@ cp /path/to/.env .                          # ANTHROPIC_API_KEY (gitignored; cop
 # check
 aip-spec --version                          # 0.5a1
 ls build/aip                                # aip_spec-*.whl and aip-*.whl
-python3 -c "import json;d=json.load(open('generated-skills/AIP_REF.json'));print(d['aip']['sha'][:7], d['aip_spec']['ref'])"
-ls -d generated-skills/*/aip-from-curated/*/ | wc -l                           # 28
-for d in generated-skills/*/aip-from-curated/*/; do aip-spec validate "$d" >/dev/null 2>&1 || echo "INVALID $d"; done
+python3 -c "import json;d=json.load(open('generated-skills/REFS.json'));print({k:v.get('format_version') for k,v in d.items()})"
+ls -d generated-skills/*/{dist,aip-0.3a3,aip-0.6a1}/*/ | wc -l                 # 84 for the ablation cohort
+for v in dist aip-0.3a3 aip-0.6a1; do uv run python scripts/campaign.py check ablation --variant $v | tail -1; done
 docker info --format 'cpus={{.NCPU}} mem={{.MemTotal}}'
 ```
 
@@ -106,56 +116,55 @@ concurrency 12 and up. Each task's first trial builds its image with the agent b
 in (about two minutes, once); a slow network makes that and the tasks' own verifier
 downloads the bottleneck, so run campaigns where bandwidth is good.
 
-### The two-AIP-mode campaign on the 28 tasks
+### The ablation campaign on the 28 tasks
 
 ```sh
-OUT=runs/campaign-28-aip-$(date +%F)
+OUT=runs/campaign-ablation-$(date +%F)
 caffeinate -dimsu uv run aip-skillbench run-matrix \
-  --config configs/campaign-27.yaml \
-  --mode aip-spec --mode aip-runtime \
-  --agent-env MAX_THINKING_TOKENS=0 \
-  --trials 5 --concurrency 10 \
-  --out "$OUT" --yes
+  --config configs/campaign-ablation.yaml --out "$OUT" --yes
+# or a subset of its scenarios:
+caffeinate -dimsu uv run aip-skillbench run-matrix \
+  --config configs/campaign-ablation.yaml --scenario aip-spec --scenario aip-rt --out "$OUT" --yes
 ```
 
-`--agent-env MAX_THINKING_TOKENS=0` runs the solver with extended thinking off; it is
-required for Claude 5 models until `claude-agent-acp` ships an SDK that speaks their
-thinking parameter, and it is recorded in `campaign.json`. Drop `caffeinate` on Linux.
-Re-running the same command resumes; cells that errored are treated as done, so after
-a bad run use a new `--out` or delete the directory.
+The config's `agent_env: [MAX_THINKING_TOKENS=0]` runs the solver with extended thinking
+off; it is required for Claude 5 models until `claude-agent-acp` ships an SDK that speaks
+their thinking parameter, and it is recorded in `campaign.json`. Drop `caffeinate` on
+Linux. Re-running the same command resumes; cells that errored are treated as done, so
+after a bad run use a new `--out` or delete the directory.
 
 ## Running a campaign
 
 Prerequisites: `uv sync`, `.env` with `ANTHROPIC_API_KEY` (the solver, and `claude -p`
 for compiling), Docker Desktop running, and the `claude` CLI on PATH for compiling.
 
-1. **Bootstrap once** (and again only when the AIP pins change):
+1. **Bootstrap once** (and again only when a variant's pins change):
 
    ```bash
    uv run aip-skillbench bootstrap
-   cat generated-skills/AIP_REF.json     # aip sha, aip-spec ref, aip_version 0.5a1
+   cat generated-skills/REFS.json        # per variant: refs, shas, format version
    ```
 
-2. **Compile the collection.** Authors a `--single` pack with Opus for every task whose
-   pack is missing or fails validation, then runs the validation sweep and the
-   `_authoring` audit over the whole collection. Tasks with a valid pack are skipped, so
-   this is a no-op when the packs are already committed.
+2. **Compile the collection, per variant.** Authors one pack with Opus for every task
+   whose pack under that variant is missing or fails the variant's gate, then runs the
+   gate sweep and the `_authoring` audit over the whole collection. Tasks with a valid
+   pack are skipped, so this is a no-op when the packs are already committed.
 
    ```bash
-   bash scripts/compile-collection.sh N --dry-run   # what it would compile and spend; spends nothing
-   bash scripts/compile-collection.sh N             # prints the estimate, waits 5 s (--yes skips the wait)
-   bash scripts/compile-collection.sh N --force     # recompile every task in the collection
+   bash scripts/compile-collection.sh N --variant V --dry-run   # what it would compile and spend; spends nothing
+   bash scripts/compile-collection.sh N --variant V             # prints the estimate, waits 5 s (--yes skips the wait)
+   bash scripts/compile-collection.sh N --variant V --force     # recompile every task in the collection
    ```
 
-   It must end with every task `ok` (`aip-spec validate` clean, `audit.json` `"ok": true`).
-   Commit `generated-skills/` (packs, `_authoring/`, `AIP_REF.json`) before the campaign
-   so the run is tied to committed pack bytes.
+   It must end with every task `ok` (the gate clean, `audit.json` `"ok": true`). Commit
+   `generated-skills/` (packs, `_authoring/`, `REFS.json`) before the campaign so the run
+   is tied to committed pack bytes.
 
-3. **Optional plumbing trial** on one task (about $0.10 and 5 min per mode):
+3. **Optional plumbing trial** on one task (about $0.10 and 5 min per scenario):
 
    ```bash
-   uv run aip-skillbench eval --task exoplanet-detection-period --model claude-haiku-4-5 \
-     --mode aip-runtime --jobs-dir jobs/plumb-aip-runtime
+   uv run aip-skillbench run-matrix --config configs/campaign-ablation.yaml \
+     --task exoplanet-detection-period --trials 1 --out runs/plumb-$(date +%F) --yes
    ```
 
 4. **Run the campaign:**
@@ -224,12 +233,12 @@ A cell shows as running when its `cells/<cell>/` dir exists but no summary row d
 
 `runs/campaign-N-<date>/` holds:
 
-- `campaign.json`: the settings the run started with: tasks, models, modes, trials,
-  concurrency, agent, sandbox, `decision_model`, `aip_nudge`, `aip_version` (must be
-  `0.5a1`), and `aip_ref` (the full contents of `AIP_REF.json`, including both commit
+- `campaign.json`: the settings the run started with: tasks, models, scenarios (name,
+  mode, variant, nudge), trials, concurrency, agent, sandbox, `decision_model`,
+  `agent_env`, and `refs` (each used variant's block from `REFS.json`, with its commit
   shas). Rewritten on each resume with that resume's `already_done_at_start`/`to_run`.
-- `summary.csv` / `summary.jsonl`: one row per finished cell: `task, model, mode, trial,
-  status` (`pass` = reward ≥ 1, `fail`, or `error` = no usable `result.json`), `reward`,
+- `summary.csv` / `summary.jsonl`: one row per finished cell: `task, model, scenario,
+  mode, variant, trial, status` (`pass` = reward ≥ 1, `fail`, or `error` = no usable `result.json`), `reward`,
   `n_tool_calls`, `wall_clock` (seconds), `error`, `trial_dir` (the benchflow trial
   directory), timestamps, `subprocess_rc`. A resumed cell that was re-run appears twice;
   the last row wins.
@@ -241,30 +250,32 @@ The report's per-AIP-cell signals come from `agent/acp_trajectory.jsonl`. The tr
 keeps each terminal call's description and output, not its command line, so `aip` calls
 are recognised by what they print.
 
-### Audit signals per mode
+### Audit signals per scenario
 
-| mode | what should be true | where to look |
+| scenario | what should be true | where to look |
 |---|---|---|
-| `human-curated` | the task's own skills only; no `aip` anywhere | trajectory; `timing.json` has no `aip_*` keys and no `memory_file` |
-| `aip-spec` | the pack is launched as a skill and its step scripts run with JSON state on stdin, each printing a JSON object; no `aip` command | report: `skill=<pack name>`, `json_steps` ≥ the graph's execution steps, `aip_mentions=0`; `timing.json` has only `memory_file` among the extras |
-| `aip-runtime` | only the generic `aip-runtime` skill is mounted; the solver runs `aip search` → `aip info` → `aip run <name>` (by name, not a folder) → `aip resume` per pause, reaching `"done": true` | report: `skill=aip-runtime`, `search` ≥ 1, `run/resume` ≥ 1, `done=yes`; `timing.json` has `aip_install`, `aip_server`, `aip_publish`, `memory_file` |
+| `human` | the task's own skills only; no `aip` anywhere | report: `skill=<a curated skill>`; `timing.json` has no `aip_*` keys and no `memory_file` |
+| `dist` | the dist pack is launched as a skill; no `aip` anywhere | report: `skill=<pack name>`; no extras in `timing.json` |
+| `aip-v03` | the 0.3a3 pack is launched as a skill; no `aip` command | report: `skill=<pack name>`, `aip_mentions=0`; no extras in `timing.json` |
+| `aip-spec` | the 0.6a1 pack is launched as a skill and its step scripts run with JSON state on stdin, each printing a JSON object; no `aip` command | report: `skill=<pack name>`, `json_steps` ≥ the graph's execution steps, `aip_mentions=0`; no extras in `timing.json` (no nudge) |
+| `aip-rt` | only the generic `aip-runtime` skill is mounted; the solver runs `aip search` → `aip info` → `aip run <name>` (by name, not a folder) → `aip resume` per pause, reaching `"done": true` | report: `skill=aip-runtime`, `search` ≥ 1, `run/resume` ≥ 1, `done=yes`; `timing.json` has `aip_install`, `aip_server`, `aip_publish`, `memory_file` |
 
 An `aip-runtime` cell with `done=NO` means the solver abandoned the protocol or the run
 failed (`failed` counts `aip: <error>` outputs); that is a measurement, not a harness
 failure. Likewise a pack that runs cleanly and computes a wrong answer is a benchmark
 result: never edit, tune, or recompile a pack to make a trial pass.
 
-Scripts run as root in `aip-runtime` (the in-container server runs them) and as the
-`agent` user in `aip-spec`; outputs land under `/root/`, which the verifier reads.
+Scripts run as the `agent` user in every scenario (the aip-rt server runs none; the
+solver's client does); outputs land under `/root/`, which the verifier reads.
 
 ## Standing rules
 
 - Never commit anything under `skill-analysis/` (untracked analysis files).
-- `generated-skills/AIP_REF.json` pins both AIP repos; commit it with the packs.
-  `aip-0.5a0` is a branch, so reproduce a cohort with
-  `uv run aip-skillbench bootstrap --force --aip-sha <aip.sha from AIP_REF.json>`.
-- `build/` is disposable: `bootstrap` rebuilds the wheels and skills, and the authoring
+- `generated-skills/REFS.json` pins every variant's repos; commit it with the packs.
+  Reproduce a variant exactly with
+  `uv run aip-skillbench bootstrap --variant V --force --aip-sha <aip.sha from REFS.json>`.
+- `build/` is disposable: `bootstrap` rebuilds every variant, and the authoring
   workspaces under `build/authoring/` are scratch.
 - `runs/` and `jobs/` are not committed.
-- The packs are format 0.5a1; the validation gate rejects any pack with an outdated
-  runtime block, so a campaign never mixes block versions.
+- Each variant's gate is its own validator; the `aip-0.6a1` gate rejects any pack with
+  an outdated runtime block, so a campaign never mixes block versions within a variant.

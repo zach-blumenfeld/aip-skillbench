@@ -1,0 +1,59 @@
+# The version and ablation benchmark (docs/aip-version-ablation-benchmark.md): five
+# scenarios on 28 tasks, Haiku 5.5 with thinking off, 5 trials per cell: 700 cells.
+# Packs: `bash scripts/compile-collection.sh ablation --variant <dist|aip-0.3a3|aip-0.6a1>`.
+# Run: `bash scripts/run-campaign.sh ablation`.
+#
+# The cohort is campaign-27's 28 tasks with four swaps, each in its difficulty and
+# category (decided 2026-10-20; reasons in the spec):
+#   fix-build-google-auto         -> fix-build-agentops        (Python 3.9 image; fallback gh-repo-analytics)
+#   suricata-custom-exfil         -> software-dependency-audit (Python 3.9 image)
+#   civ6-adjacency-optimizer      -> exam-block-sequencing     (task defect: 0/5 in every run)
+#   enterprise-information-search -> jpg-ocr-stat              (instruction contradicts verifier; never passed; fallback taxonomy-tree-merge)
+tasks:
+  - exoplanet-detection-period
+  - 3d-scan-calc
+  - earthquake-plate-calculation
+  - energy-market-pricing
+  - financial-modeling-qa
+  - exam-block-sequencing
+  - court-form-filling
+  - crystallographic-wyckoff-position-analysis
+  - dialogue-parser
+  - powerlifting-coef-calc
+  - adaptive-cruise-control
+  - bike-rebalance
+  - dapt-intrusion-detection
+  - data-to-d3
+  - drone-planning-control
+  - energy-unit-commitment
+  - jpg-ocr-stat
+  - fix-build-agentops
+  - grid-dispatch-operator
+  - jax-computing-basics
+  - mars-clouds-clustering
+  - offer-letter-generator
+  - parallel-tfidf-search
+  - protein-expression-analysis
+  - sec-financial-report
+  - spring-boot-jakarta-migration
+  - software-dependency-audit
+  - travel-planning
+models:
+  - claude-haiku-5-5
+# One row per scenario: the solver mode, the compile variant whose pack the container
+# gets, and whether the memory nudge is written. Mounted-skill scenarios get no nudge
+# (the skill's own description does the activation); aip-rt keeps its nudge because
+# nothing task-specific is mounted there.
+scenarios:
+  - {name: human,    mode: human-curated}
+  - {name: dist,     mode: skill,       variant: dist,      nudge: false}
+  - {name: aip-v03,  mode: skill,       variant: aip-0.3a3, nudge: false}
+  - {name: aip-spec, mode: skill,       variant: aip-0.6a1, nudge: false}
+  - {name: aip-rt,   mode: aip-runtime, variant: aip-0.6a1, nudge: true}
+trials: 5
+concurrency: 10
+decision_model: false
+agent_env:
+  - MAX_THINKING_TOKENS=0
+agent: claude-agent-acp
+sandbox: docker

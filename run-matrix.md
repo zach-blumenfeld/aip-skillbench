@@ -96,8 +96,12 @@ cat   runs/eval-1-haiku/status.json         # latest totals snapshot
 |---|---|---|---|
 | `--task` | yes | — | Task name under `vendor/skillsbench/tasks/`. |
 | `--model` | yes | — | Agent-specific model string (e.g. `claude-haiku-4-5`, `gpt-5.2-codex`). |
-| `--mode` | yes | all 5 | `noskill`, `human-curated`, `selfgen-skill-creator`, `aip-from-instruction`, `aip-from-curated`. |
-| `--trials` | no | 1 | Repeats per `(task, model, mode)` cell. |
+| `--mode` | yes | the 3 without a variant | `noskill`, `human-curated`, `selfgen-skill-creator`: each becomes a scenario of that name. `skill` and `aip-runtime` need a variant, so they come from a config `scenarios:` entry. |
+| `--scenario` | yes | all in the config | Run only these of the config's scenarios, by name. |
+| `--trials` | no | 1 | Repeats per `(task, model, scenario)` cell. |
+| `--dry-run` | no | off | Print the campaign (cells, scenarios, the first `eval` command) and exit without checking packs or spending. |
+| `--decision-model` | no | off | aip-runtime scenarios: the aip client answers decision steps with the decision model. Config key `decision_model`. |
+| `--agent-env` | yes | — | `KEY=VALUE` for the solver process. Config key `agent_env` (list). |
 | `--concurrency` / `-j` | no | 4 | Max concurrent cells. Real limits are Docker daemon + Anthropic rate limit. |
 | `--config` | no | — | YAML config (CLI flags override matching keys). |
 | `--out` | no | `runs/<timestamp>` | Campaign output directory. |
@@ -112,38 +116,47 @@ cat   runs/eval-1-haiku/status.json         # latest totals snapshot
 When the task list outgrows the CLI, drop it into a config file:
 
 ```yaml
-# configs/full-haiku.yaml
+# configs/example.yaml
 tasks:
   - 3d-scan-calc
-  - earthquake-phase-association
-  - bike-rebalance
-  - debug-trl-grpo
+  - exoplanet-detection-period
 models:
-  - claude-haiku-4-5
-modes:                       # optional — defaults to all 5
-  - noskill
-  - human-curated
-  - selfgen-skill-creator
-  - aip-from-instruction
-  - aip-from-curated
+  - claude-haiku-5-5
+scenarios:                   # one row per scenario; cells and columns are keyed by name
+  - {name: human,    mode: human-curated}
+  - {name: dist,     mode: skill,       variant: dist}                # nudge: false is the skill default
+  - {name: aip-spec, mode: skill,       variant: aip-0.6a1}
+  - {name: aip-rt,   mode: aip-runtime, variant: aip-0.6a1}          # nudge: true is the aip-runtime default
+  - noskill                                                           # a bare mode name is a scenario without a variant
 trials: 5
 concurrency: 4
+decision_model: false
+agent_env: [MAX_THINKING_TOKENS=0]
 agent: claude-agent-acp
 sandbox: docker
 ```
 
+`modes:` is accepted as the same shorthand as a list of bare mode names. `variant` is
+one of `dist`, `aip-0.3a3`, `aip-0.6a1` (`aip_skillbench/_variants.py`); `aip-runtime`
+takes only a variant with a runtime (`aip-0.6a1`). `nudge` is the memory-file knob,
+defaulting to off for `skill` and on for `aip-runtime`.
+
 ```bash
-uv run aip-skillbench run-matrix --config configs/full-haiku.yaml --yes
+uv run aip-skillbench run-matrix --config configs/example.yaml --dry-run   # 50 cells, spends nothing
+uv run aip-skillbench run-matrix --config configs/example.yaml --yes
 ```
 
-Any flag passed on the CLI overrides the matching key in the YAML.
+Any flag passed on the CLI overrides the matching key in the YAML. `summary.jsonl` rows
+carry `scenario`, `mode`, and `variant`; `campaign.json` records the scenarios and, per
+variant used, its block from `generated-skills/REFS.json`. The configured campaign for the
+version and ablation benchmark is `configs/campaign-ablation.yaml` (700 cells).
 
 ## Pre-flight (fails fast, runs nothing)
 
 Before any cell starts, the runner checks:
 
 1. **Tasks exist** — every `--task` resolves under `vendor/skillsbench/tasks/`.
-2. **AIP packs exist** — if `aip-from-instruction` or `aip-from-curated` is in the mode list, each task has at least one `generated-skills/<task>/aip-from-{instruction,curated}/<skill>/SKILL.md`. All missing packs are listed at once; nothing runs. **Run `aip-skillbench convert` or `aip-skillbench batch-convert` first.**
+2. **Packs exist and pass their gate** — for every scenario with a variant, each task has a `generated-skills/<task>/<variant>/<skill>/SKILL.md` that passes the variant's validator (and exactly one skill folder for `aip-runtime`). All missing or failing packs are listed at once; nothing runs. **Run `aip-skillbench convert --variant V` or `batch-convert` first.**
 3. **API key present** — the env var for `--agent` (`ANTHROPIC_API_KEY` for `claude-agent-acp`, `OPENAI_API_KEY` for `codex-acp`, `GEMINI_API_KEY` for `gemini`) is set in the environment or `.env`.
 
 Failure on any of these exits before launching subprocesses.

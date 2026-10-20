@@ -1,0 +1,43 @@
+{
+  "aip-0.6a1": {
+    "variant": "aip-0.6a1",
+    "kind": "aip",
+    "skill_name": "aip",
+    "aip": {
+      "remote": "git@github.com:zach-blumenfeld/aip.git",
+      "ref": "v0.6a1",
+      "sha": "7d0655edda71f0d67749659c2f02c59ddb8b2ab0"
+    },
+    "aip_spec": {
+      "remote": "git@github.com:zach-blumenfeld/aip-spec.git",
+      "ref": "v0.6a1",
+      "sha": "9edbf485c0b0631ed71014d9b551fced21cac8a6"
+    },
+    "format_version": "0.6a1",
+    "recorded_at": "2026-10-20T14:44:01"
+  },
+  "aip-0.3a3": {
+    "variant": "aip-0.3a3",
+    "kind": "aip-legacy",
+    "skill_name": "aip",
+    "aip": {
+      "remote": "git@github.com:zach-blumenfeld/aip.git",
+      "ref": "v0.3a3",
+      "sha": "2c20a02fe2b6c34eb98476853865a6b07946dc62"
+    },
+    "format_version": "0.3a3",
+    "recorded_at": "2026-10-20T14:44:03"
+  },
+  "dist": {
+    "variant": "dist",
+    "kind": "dist",
+    "skill_name": "skill-distillation",
+    "skill_source": {
+      "path": "distillation",
+      "repo_sha": "acb061d62f3f211bfc2c8a7491f20eed381ffd79",
+      "dirty": false
+    },
+    "format_version": null,
+    "recorded_at": "2026-10-20T14:44:03"
+  }
+}

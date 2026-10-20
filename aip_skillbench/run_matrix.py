@@ -1,4 +1,9 @@
-"""run-matrix: run a (task × model × mode × trial) eval matrix concurrently with live progress."""
+"""run-matrix: run a (task × model × scenario × trial) eval matrix concurrently with live progress.
+
+A scenario is a campaign row: a solver mode plus, for the `skill` and `aip-runtime`
+modes, the compile variant whose pack the container gets, and whether the memory nudge
+is written. Cells are keyed by scenario name (docs/aip-version-ablation-benchmark.md).
+"""
 
 from __future__ import annotations
 
@@ -22,7 +27,7 @@ from rich.live import Live
 from rich.table import Table
 from rich.text import Text
 
-from aip_skillbench._aip import read_aip_ref
+from aip_skillbench._aip import VARIANTS, read_refs, skill_dirs, validate_packs
 
 ROOT = Path(__file__).resolve().parents[1]
 VENDOR_SKILLSBENCH = ROOT / "vendor" / "skillsbench"
@@ -30,36 +35,20 @@ GENERATED_SKILLS = ROOT / "generated-skills"
 
 
 class Mode(str, Enum):
+    """Kept in sync with cli.Mode."""
     noskill = "noskill"
     human_curated = "human-curated"
     selfgen_skill_creator = "selfgen-skill-creator"
-    aip_from_instruction = "aip-from-instruction"
-    aip_spec = "aip-spec"
+    skill = "skill"
     aip_runtime = "aip-runtime"
-    model_dist = "model-dist"
-    # Deprecated alias of aip-runtime (kept in sync with cli.Mode).
-    aip_from_curated = "aip-from-curated"
 
 
-# The default mode set: every implemented mode, without the deprecated alias.
-ALL_MODES: list[Mode] = [m for m in Mode if m not in (Mode.model_dist, Mode.aip_from_curated)]
-
+VARIANT_MODES = (Mode.skill, Mode.aip_runtime)
 
 AGENT_KEY_ENV = {
     "claude-agent-acp": "ANTHROPIC_API_KEY",
     "codex-acp": "OPENAI_API_KEY",
     "gemini": "GEMINI_API_KEY",
-}
-
-MODE_LABEL = {
-    Mode.noskill: "noskill",
-    Mode.human_curated: "human",
-    Mode.selfgen_skill_creator: "selfgen",
-    Mode.aip_from_instruction: "aip-inst",
-    Mode.aip_spec: "aip-spec",
-    Mode.aip_runtime: "aip-rt",
-    Mode.model_dist: "model-dist",
-    Mode.aip_from_curated: "aip-cur",
 }
 
 SYM_PENDING = "▢"
@@ -69,27 +58,85 @@ SYM_FAIL = "✗"
 SYM_ERROR = "·"
 
 
+@dataclass(frozen=True)
+class Scenario:
+    name: str
+    mode: str
+    variant: Optional[str] = None
+    nudge: Optional[bool] = None  # None = the mode's default (skill: off, aip-runtime: on)
+
+    @property
+    def nudge_effective(self) -> bool:
+        if self.nudge is not None:
+            return self.nudge
+        return self.mode == Mode.aip_runtime.value
+
+    def as_dict(self) -> dict:
+        return {"name": self.name, "mode": self.mode, "variant": self.variant, "nudge": self.nudge_effective}
+
+    @classmethod
+    def parse(cls, item: object) -> Scenario:
+        """A config entry: a mode name (shorthand for a scenario without a variant) or a
+        mapping {name, mode, variant?, nudge?}."""
+        if isinstance(item, str):
+            mode = Mode(item)
+            if mode in VARIANT_MODES:
+                raise typer.BadParameter(f"mode {mode.value} needs a variant: write it as a scenario mapping")
+            return cls(name=mode.value, mode=mode.value)
+        if not isinstance(item, dict) or "mode" not in item:
+            raise typer.BadParameter(f"scenario must be a mode name or a mapping with `mode`: {item!r}")
+        mode = Mode(item["mode"])
+        variant = item.get("variant")
+        if mode in VARIANT_MODES and not variant:
+            raise typer.BadParameter(f"scenario {item.get('name', mode.value)!r}: mode {mode.value} needs `variant`")
+        if mode not in VARIANT_MODES and variant:
+            raise typer.BadParameter(f"scenario {item.get('name', mode.value)!r}: mode {mode.value} takes no variant")
+        if variant and variant not in VARIANTS:
+            raise typer.BadParameter(f"scenario {item.get('name')!r}: unknown variant {variant!r}; one of {', '.join(VARIANTS)}")
+        if mode is Mode.aip_runtime and not VARIANTS[variant].has_runtime:
+            raise typer.BadParameter(f"scenario {item.get('name')!r}: variant {variant} has no runtime; aip-runtime needs one of "
+                                     + ", ".join(n for n, v in VARIANTS.items() if v.has_runtime))
+        nudge = item.get("nudge")
+        if nudge is not None and not isinstance(nudge, bool):
+            raise typer.BadParameter(f"scenario {item.get('name')!r}: `nudge` must be true or false")
+        if nudge and mode not in VARIANT_MODES:
+            raise typer.BadParameter(f"scenario {item.get('name')!r}: `nudge` applies to skill and aip-runtime only")
+        name = item.get("name") or (f"{mode.value}:{variant}" if variant else mode.value)
+        return cls(name=str(name), mode=mode.value, variant=variant, nudge=nudge)
+
+
+def parse_scenarios(items: list[object]) -> list[Scenario]:
+    scenarios = [Scenario.parse(i) for i in items]
+    names = [s.name for s in scenarios]
+    dupes = sorted({n for n in names if names.count(n) > 1})
+    if dupes:
+        raise typer.BadParameter(f"duplicate scenario name(s): {dupes}")
+    return scenarios
+
+
 @dataclass
 class Cell:
     task: str
     model: str
-    mode: str
+    scenario: str
     trial: int
 
     @property
     def key(self) -> str:
-        return f"{self.task}|{self.model}|{self.mode}|t{self.trial}"
+        return f"{self.task}|{self.model}|{self.scenario}|t{self.trial}"
 
     @property
     def safe_name(self) -> str:
-        return f"{self.task}__{self.model}__{self.mode}__t{self.trial}"
+        return f"{self.task}__{self.model}__{self.scenario}__t{self.trial}"
 
 
 @dataclass
 class CellResult:
     task: str
     model: str
+    scenario: str
     mode: str
+    variant: Optional[str]
     trial: int
     status: str  # "pass" | "fail" | "error"
     reward: Optional[float]
@@ -109,7 +156,7 @@ class MatrixState:
     def __init__(
         self,
         cells: list[Cell],
-        modes: list[Mode],
+        scenarios: list[Scenario],
         models: list[str],
         tasks: list[str],
         trials: int,
@@ -118,7 +165,7 @@ class MatrixState:
         status_path: Path,
     ) -> None:
         self.cells = cells
-        self.modes = modes
+        self.scenarios = scenarios
         self.models = models
         self.tasks = tasks
         self.trials = trials
@@ -168,7 +215,7 @@ class MatrixState:
             try:
                 r = json.loads(line)
                 cr = CellResult(**r)
-                key = Cell(cr.task, cr.model, cr.mode, cr.trial).key
+                key = Cell(cr.task, cr.model, cr.scenario, cr.trial).key
                 self.results[key] = cr
                 self.status[key] = cr.status
             except (json.JSONDecodeError, TypeError):
@@ -186,41 +233,31 @@ def _validate_tasks(tasks: list[str]) -> None:
         )
 
 
-def _validate_generated_skills(tasks: list[str], modes: list[Mode]) -> None:
-    if Mode.model_dist in modes:
-        raise typer.BadParameter(
-            "mode model-dist: not implemented; see prompts/modes-plan.md Appendix A"
-        )
-    needs: list[tuple[str, str]] = []
-    if Mode.aip_from_instruction in modes:
-        needs.extend((t, "aip-from-instruction") for t in tasks)
-    # aip-spec and aip-runtime (and its alias) use the same pack bytes.
-    if {Mode.aip_spec, Mode.aip_runtime, Mode.aip_from_curated} & set(modes):
-        needs.extend((t, "aip-from-curated") for t in tasks)
+def _validate_generated_skills(tasks: list[str], scenarios: list[Scenario]) -> None:
+    """Every (task, variant) a scenario needs has a pack that passes the variant's gate,
+    before a campaign spends money on it; aip-runtime needs exactly one skill folder."""
+    needs: dict[str, bool] = {}  # variant -> needs a single folder (runtime)
+    for s in scenarios:
+        if s.variant:
+            needs[s.variant] = needs.get(s.variant, False) or s.mode == Mode.aip_runtime.value
     missing: list[str] = []
-    for task, sub in needs:
-        d = GENERATED_SKILLS / task / sub
-        if not d.exists() or not any(
-            p.is_dir() and (p / "SKILL.md").exists() for p in d.iterdir()
-        ):
-            missing.append(str(d))
-    if missing:
-        bullets = "\n  - ".join(missing)
-        raise typer.BadParameter(
-            "Missing AIP-converted skill packs. Run `aip-skillbench convert` "
-            "or `aip-skillbench batch-convert` first.\n  - " + bullets
-        )
-    # Every pack must validate against the bootstrapped AIP format before a
-    # campaign spends money on it (old-format packs fail here after a bump).
-    from aip_skillbench._aip import validate_packs
-
     failures: list[str] = []
-    for task, sub in needs:
-        failures.extend(validate_packs(GENERATED_SKILLS / task / sub))
+    for vname, single in needs.items():
+        v = VARIANTS[vname]
+        for task in tasks:
+            root = v.pack_root(task)
+            dirs = skill_dirs(root)
+            if not dirs:
+                missing.append(f"{root}  (aip-skillbench convert --task {task} --variant {vname})")
+                continue
+            if single and len(dirs) != 1:
+                failures.append(f"{root}: aip-runtime publishes one procedure per task, found {len(dirs)} skill folders")
+            failures.extend(validate_packs(v, root))
+    if missing:
+        raise typer.BadParameter("Missing packs:\n  - " + "\n  - ".join(missing))
     if failures:
         raise typer.BadParameter(
-            "AIP skill packs that do not validate against the bootstrapped AIP "
-            "format (regenerate with `aip-skillbench convert --force`):\n  - "
+            "Packs that fail their variant's gate (regenerate with `aip-skillbench convert --force`):\n  - "
             + "\n  - ".join(failures)
         )
 
@@ -252,45 +289,71 @@ def _validate_api_key(agent: str) -> None:
 
 
 def _build_cells(
-    tasks: list[str], models: list[str], modes: list[Mode], trials: int
+    tasks: list[str], models: list[str], scenarios: list[Scenario], trials: int
 ) -> list[Cell]:
     cells: list[Cell] = []
     for t in tasks:
         for m in models:
-            for mode in modes:
+            for s in scenarios:
                 for trial in range(trials):
-                    cells.append(Cell(task=t, model=m, mode=mode.value, trial=trial))
+                    cells.append(Cell(task=t, model=m, scenario=s.name, trial=trial))
     return cells
 
 
 def _load_done(summary_path: Path) -> set[str]:
-    if not summary_path.exists():
-        return set()
     done: set[str] = set()
+    if not summary_path.exists():
+        return done
     for line in summary_path.read_text().splitlines():
-        s = line.strip()
-        if not s:
+        line = line.strip()
+        if not line:
             continue
         try:
-            r = json.loads(s)
-            done.add(Cell(r["task"], r["model"], r["mode"], r["trial"]).key)
+            r = json.loads(line)
+            done.add(Cell(r["task"], r["model"], r["scenario"], r["trial"]).key)
         except (json.JSONDecodeError, KeyError):
             continue
     return done
 
 
 def _find_result_json(cell_jobs_dir: Path) -> Optional[Path]:
-    candidates = list(cell_jobs_dir.glob("*/*/result.json"))
+    """Return the newest result.json under the cell's jobs dir, or None."""
+    candidates = list(cell_jobs_dir.glob("**/result.json"))
     if not candidates:
         return None
     candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return candidates[0]
 
 
+def eval_command(cell: Cell, scenario: Scenario, agent: str, sandbox: str, jobs_dir: Path,
+                 decision_model: bool, agent_env: list[str] | None) -> list[str]:
+    """The `aip-skillbench eval` invocation for one cell."""
+    cmd = [
+        "uv", "run", "aip-skillbench", "eval",
+        "--task", cell.task,
+        "--model", cell.model,
+        "--mode", scenario.mode,
+        "--agent", agent,
+        "--sandbox", sandbox,
+        "--concurrency", "1",
+        "--jobs-dir", str(jobs_dir),
+    ]
+    if scenario.variant:
+        cmd += ["--variant", scenario.variant]
+    if scenario.mode == Mode.skill.value:
+        cmd.append("--nudge" if scenario.nudge_effective else "--no-nudge")
+    elif scenario.mode == Mode.aip_runtime.value:
+        cmd.append("--aip-nudge" if scenario.nudge_effective else "--no-aip-nudge")
+        if decision_model:
+            cmd.append("--decision-model")
+    for kv in agent_env or []:
+        cmd += ["--agent-env", kv]
+    return cmd
+
+
 def _run_cell(
-    cell: Cell, out: Path, agent: str, sandbox: str, state: MatrixState,
+    cell: Cell, scenario: Scenario, out: Path, agent: str, sandbox: str, state: MatrixState,
     decision_model: bool = False,
-    aip_nudge: bool = True,
     agent_env: list[str] | None = None,
 ) -> CellResult:
     state.mark_running(cell)
@@ -299,23 +362,7 @@ def _run_cell(
     log_path = out / "logs" / f"{cell.safe_name}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
-    cmd = [
-        "uv", "run", "aip-skillbench", "eval",
-        "--task", cell.task,
-        "--model", cell.model,
-        "--mode", cell.mode,
-        "--agent", agent,
-        "--sandbox", sandbox,
-        "--concurrency", "1",
-        "--jobs-dir", str(cell_jobs_dir),
-    ]
-    # eval refuses --decision-model outside aip-runtime, so it applies to those cells only.
-    if decision_model and cell.mode in (Mode.aip_runtime.value, Mode.aip_from_curated.value):
-        cmd.append("--decision-model")
-    if not aip_nudge:
-        cmd.append("--no-aip-nudge")
-    for kv in agent_env or []:
-        cmd += ["--agent-env", kv]
+    cmd = eval_command(cell, scenario, agent, sandbox, cell_jobs_dir, decision_model, agent_env)
     started_at = datetime.now().isoformat()
     with open(log_path, "w") as logf:
         logf.write("$ " + " ".join(cmd) + "\n\n")
@@ -355,7 +402,9 @@ def _run_cell(
     return CellResult(
         task=cell.task,
         model=cell.model,
-        mode=cell.mode,
+        scenario=scenario.name,
+        mode=scenario.mode,
+        variant=scenario.variant,
         trial=cell.trial,
         status=status,
         reward=reward,
@@ -386,16 +435,16 @@ def _render(state: MatrixState) -> Group:
     matrix = Table(title="Trials", show_header=True, header_style="bold")
     matrix.add_column("task")
     matrix.add_column("model")
-    for mode in state.modes:
-        matrix.add_column(MODE_LABEL[mode], justify="center")
+    for s in state.scenarios:
+        matrix.add_column(s.name, justify="center")
 
     for task in state.tasks:
         for model in state.models:
             row = [task, model]
-            for mode in state.modes:
+            for s in state.scenarios:
                 glyphs: list[str] = []
                 for trial in range(state.trials):
-                    s = state.status.get(Cell(task, model, mode.value, trial).key, "pending")
+                    st = state.status.get(Cell(task, model, s.name, trial).key, "pending")
                     glyphs.append(
                         {
                             "pending": SYM_PENDING,
@@ -403,28 +452,32 @@ def _render(state: MatrixState) -> Group:
                             "pass": f"[green]{SYM_PASS}[/]",
                             "fail": f"[red]{SYM_FAIL}[/]",
                             "error": f"[magenta]{SYM_ERROR}[/]",
-                        }[s]
+                        }[st]
                     )
                 row.append(" ".join(glyphs))
             matrix.add_row(*row)
 
-    summary = Table(title="Per-mode aggregates", show_header=True, header_style="bold")
+    summary = Table(title="Per-scenario aggregates", show_header=True, header_style="bold")
+    summary.add_column("scenario")
     summary.add_column("mode")
+    summary.add_column("variant")
     summary.add_column("n", justify="right")
     summary.add_column("pass", justify="right")
     summary.add_column("pass%", justify="right")
     summary.add_column("mean reward", justify="right")
     summary.add_column("mean tool calls", justify="right")
     summary.add_column("mean wall (s)", justify="right")
-    for mode in state.modes:
-        rs = [r for r in state.results.values() if r.mode == mode.value]
+    for s in state.scenarios:
+        rs = [r for r in state.results.values() if r.scenario == s.name]
         n = len(rs)
         passes = sum(1 for r in rs if r.status == "pass")
         rewards = [r.reward for r in rs if r.reward is not None]
         tcs = [r.n_tool_calls for r in rs if r.n_tool_calls is not None]
         wcs = [r.wall_clock for r in rs if r.wall_clock is not None]
         summary.add_row(
-            MODE_LABEL[mode],
+            s.name,
+            s.mode,
+            s.variant or "—",
             str(n),
             str(passes),
             f"{passes / n * 100:.1f}%" if n else "—",
@@ -439,7 +492,7 @@ def _render(state: MatrixState) -> Group:
 def run_matrix(
     tasks: list[str],
     models: list[str],
-    modes: list[Mode],
+    scenarios: list[Scenario],
     trials: int,
     concurrency: int,
     out: Path,
@@ -449,29 +502,24 @@ def run_matrix(
     force: bool,
     shuffle: bool,
     decision_model: bool = False,
-    aip_nudge: bool = True,
     agent_env: list[str] | None = None,
+    dry_run: bool = False,
 ) -> int:
     if not tasks:
         raise typer.BadParameter("no tasks specified (use --task ... or --config)")
     if not models:
         raise typer.BadParameter("no models specified (use --model ... or --config)")
-    if not modes:
-        modes = list(ALL_MODES)
+    if not scenarios:
+        raise typer.BadParameter("no scenarios specified (config `scenarios:`/`modes:` or --mode ...)")
     if trials < 1:
         raise typer.BadParameter(f"--trials must be >= 1 (got {trials})")
     if concurrency < 1:
         raise typer.BadParameter(f"--concurrency must be >= 1 (got {concurrency})")
 
     _validate_tasks(tasks)
-    _validate_generated_skills(tasks, modes)
-    _validate_api_key(agent)
-
-    cells = _build_cells(tasks, models, modes, trials)
+    cells = _build_cells(tasks, models, scenarios, trials)
     if shuffle:
         random.shuffle(cells)
-
-    out.mkdir(parents=True, exist_ok=True)
     summary_path = out / "summary.jsonl"
     csv_path = out / "summary.csv"
     status_path = out / "status.json"
@@ -481,12 +529,25 @@ def run_matrix(
     typer.echo(f"Campaign: {out}")
     typer.echo(f"  tasks       ({len(tasks)}): {', '.join(tasks)}")
     typer.echo(f"  models      ({len(models)}): {', '.join(models)}")
-    typer.echo(f"  modes       ({len(modes)}): {', '.join(m.value for m in modes)}")
+    typer.echo(f"  scenarios   ({len(scenarios)}):")
+    for s in scenarios:
+        typer.echo(f"    {s.name:<14} mode={s.mode:<22} variant={s.variant or '-':<10} nudge={'on' if s.nudge_effective else 'off'}")
     typer.echo(f"  trials:      {trials}")
     typer.echo(
         f"  total cells: {len(cells)}   already done: {len(done)}   to run: {len(pending)}"
     )
-    typer.echo(f"  concurrency: {concurrency}   agent: {agent}   sandbox: {sandbox}")
+    typer.echo(f"  concurrency: {concurrency}   agent: {agent}   sandbox: {sandbox}   decision_model: {decision_model}")
+    if dry_run:
+        typer.echo("\nDry run: packs are not checked and nothing is spent. First cell's command:")
+        if pending:
+            c = pending[0]
+            sc = next(s for s in scenarios if s.name == c.scenario)
+            typer.echo("  " + " ".join(eval_command(c, sc, agent, sandbox, out / "cells" / c.safe_name, decision_model, agent_env)))
+        return 0
+
+    _validate_generated_skills(tasks, scenarios)
+    _validate_api_key(agent)
+    out.mkdir(parents=True, exist_ok=True)
     if not pending:
         typer.echo("Nothing to do.")
         return 0
@@ -497,23 +558,21 @@ def run_matrix(
             time.sleep(1)
         typer.echo()
 
-    aip_ref = read_aip_ref()
+    refs = read_refs()
     (out / "campaign.json").write_text(
         json.dumps(
             {
                 "started_at": datetime.now().isoformat(),
                 "tasks": tasks,
                 "models": models,
-                "modes": [m.value for m in modes],
+                "scenarios": [s.as_dict() for s in scenarios],
                 "trials": trials,
                 "concurrency": concurrency,
                 "agent": agent,
                 "sandbox": sandbox,
                 "decision_model": decision_model,
-                "aip_nudge": aip_nudge,
                 "agent_env": agent_env or [],
-                "aip_version": aip_ref.get("aip_version"),
-                "aip_ref": aip_ref,
+                "refs": {name: refs.get(name) for name in sorted({s.variant for s in scenarios if s.variant})},
                 "total_cells": len(cells),
                 "already_done_at_start": len(done),
                 "to_run": len(pending),
@@ -525,7 +584,7 @@ def run_matrix(
 
     state = MatrixState(
         cells=cells,
-        modes=modes,
+        scenarios=scenarios,
         models=models,
         tasks=tasks,
         trials=trials,
@@ -534,12 +593,13 @@ def run_matrix(
         status_path=status_path,
     )
     state.preload()
+    by_name = {s.name: s for s in scenarios}
 
     console = Console()
     with Live(_render(state), refresh_per_second=2, console=console) as live:
         with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as ex:
             futures = {
-                ex.submit(_run_cell, c, out, agent, sandbox, state, decision_model, aip_nudge, agent_env): c
+                ex.submit(_run_cell, c, by_name[c.scenario], out, agent, sandbox, state, decision_model, agent_env): c
                 for c in pending
             }
             try:
@@ -548,8 +608,10 @@ def run_matrix(
                     try:
                         result = fut.result()
                     except Exception as e:
+                        sc = by_name[cell.scenario]
                         result = CellResult(
-                            task=cell.task, model=cell.model, mode=cell.mode, trial=cell.trial,
+                            task=cell.task, model=cell.model, scenario=cell.scenario,
+                            mode=sc.mode, variant=sc.variant, trial=cell.trial,
                             status="error", reward=None, n_tool_calls=None, wall_clock=None,
                             error=f"worker exception: {e!r}",
                             jobs_dir=str(out / "cells" / cell.safe_name),
@@ -583,11 +645,11 @@ def _load_campaign_state(out: Path) -> MatrixState:
     campaign = json.loads((out / "campaign.json").read_text())
     tasks = list(campaign["tasks"])
     models = list(campaign["models"])
-    modes = [Mode(m) for m in campaign["modes"]]
+    scenarios = parse_scenarios(campaign["scenarios"])
     trials = int(campaign["trials"])
-    cells = _build_cells(tasks, models, modes, trials)
+    cells = _build_cells(tasks, models, scenarios, trials)
     state = MatrixState(
-        cells=cells, modes=modes, models=models, tasks=tasks, trials=trials,
+        cells=cells, scenarios=scenarios, models=models, tasks=tasks, trials=trials,
         summary_path=out / "summary.jsonl", csv_path=out / "summary.csv",
         status_path=out / "status.json",
     )

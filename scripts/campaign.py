@@ -1,10 +1,10 @@
 """Helpers behind scripts/compile-collection.sh and scripts/run-campaign.sh (docs/campaigns.md).
 
-    uv run python scripts/campaign.py tasks N           # the collection's tasks, one per line
-    uv run python scripts/campaign.py to-compile N [--force]
-                                                        # tasks needing a pack: "<task>\t<why>"
-    uv run python scripts/campaign.py check N           # validation sweep + _authoring audit
-    uv run python scripts/campaign.py report OUT        # per-mode summary + per-AIP-cell signals
+    uv run python scripts/campaign.py tasks N                      # the collection's tasks, one per line
+    uv run python scripts/campaign.py to-compile N --variant V [--force]
+                                                                   # tasks needing a V pack: "<task>\t<why>"
+    uv run python scripts/campaign.py check N --variant V          # V's gate sweep + _authoring audit
+    uv run python scripts/campaign.py report OUT                   # per-scenario summary + per-cell skill signals
 
 The collection's task list lives only in configs/campaign-N.yaml.
 
@@ -27,11 +27,11 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from aip_skillbench._aip import validate_packs  # noqa: E402
+from aip_skillbench._aip import VARIANTS, Variant, validate_packs  # noqa: E402
 
 GENERATED = ROOT / "generated-skills"
-COLLECTIONS = ("1", "5", "10", "27")
-AIP_RUNTIME_MODES = {"aip-runtime", "aip-from-curated"}
+COLLECTIONS = ("1", "5", "10", "27", "ablation")
+AIP_RUNTIME_MODES = {"aip-runtime", "aip-from-curated"}  # the alias: campaign dirs from before 2026-10-20
 SEARCH_HIT = re.compile(r"^[\w.-]+@[0-9a-f]{8,}\s+\d", re.M)
 AIP_ERROR = re.compile(r"^aip: \w+", re.M)
 
@@ -42,12 +42,17 @@ def config(n: str) -> dict:
     return yaml.safe_load((ROOT / "configs" / f"campaign-{n}.yaml").read_text())
 
 
-def pack_dir(task: str) -> Path:
-    return GENERATED / task / "aip-from-curated"
+def variant_arg(argv: list[str]) -> Variant:
+    if "--variant" not in argv or argv.index("--variant") + 1 >= len(argv):
+        sys.exit("--variant <name> is required; one of " + ", ".join(VARIANTS))
+    name = argv[argv.index("--variant") + 1]
+    if name not in VARIANTS:
+        sys.exit(f"unknown variant {name!r}; one of " + ", ".join(VARIANTS))
+    return VARIANTS[name]
 
 
-def has_pack(task: str) -> bool:
-    d = pack_dir(task)
+def has_pack(task: str, v: Variant) -> bool:
+    d = v.pack_root(task)
     return d.is_dir() and any((p / "SKILL.md").exists() for p in d.iterdir() if p.is_dir())
 
 
@@ -56,13 +61,13 @@ def cmd_tasks(n: str) -> int:
     return 0
 
 
-def cmd_to_compile(n: str, force: bool) -> int:
+def cmd_to_compile(n: str, v: Variant, force: bool) -> int:
     for task in config(n)["tasks"]:
         if force:
             why = "forced"
-        elif not has_pack(task):
+        elif not has_pack(task, v):
             why = "missing"
-        elif validate_packs(pack_dir(task)):
+        elif validate_packs(v, v.pack_root(task)):
             why = "invalid"
         else:
             continue
@@ -70,13 +75,13 @@ def cmd_to_compile(n: str, force: bool) -> int:
     return 0
 
 
-def cmd_check(n: str) -> int:
+def cmd_check(n: str, v: Variant) -> int:
     bad = 0
     for task in config(n)["tasks"]:
-        problems = validate_packs(pack_dir(task)) if has_pack(task) else ["no pack"]
-        audit = GENERATED / task / "_authoring" / "curated" / "single" / "audit.json"
+        problems = validate_packs(v, v.pack_root(task)) if has_pack(task, v) else ["no pack"]
+        audit = v.record_dir(task) / "single" / "audit.json"
         if not audit.exists():
-            problems.append("no _authoring/curated/single/audit.json")
+            problems.append(f"no {audit.relative_to(GENERATED)}")
         elif not json.loads(audit.read_text()).get("ok"):
             problems.append(f"audit not ok: {audit}")
         if problems:
@@ -154,6 +159,10 @@ def _mean(xs: list) -> str:
     return f"{sum(xs) / len(xs):.1f}" if xs else "-"
 
 
+def _scenario_of(r: dict) -> str:
+    return r.get("scenario") or r["mode"]
+
+
 def cmd_report(out: str) -> int:
     out_dir = Path(out)
     summary = out_dir / "summary.jsonl"
@@ -164,41 +173,55 @@ def cmd_report(out: str) -> int:
     for line in summary.read_text().splitlines():
         if line.strip():
             r = json.loads(line)
-            latest[(r["task"], r["model"], r["mode"], r["trial"])] = r
+            latest[(r["task"], r["model"], _scenario_of(r), r["trial"])] = r
     rows = list(latest.values())
     camp = out_dir / "campaign.json"
-    modes = json.loads(camp.read_text())["modes"] if camp.exists() else sorted({r["mode"] for r in rows})
+    campaign = json.loads(camp.read_text()) if camp.exists() else {}
+    if "scenarios" in campaign:
+        scenarios = [(sc["name"], sc["mode"], sc.get("variant")) for sc in campaign["scenarios"]]
+    else:  # a campaign dir from before scenarios existed: one per mode
+        modes = campaign.get("modes") or sorted({r["mode"] for r in rows})
+        scenarios = [(m, m, None) for m in modes]
 
-    print(f"\nPer-mode summary ({out_dir})")
-    print(f"{'mode':<16}{'n':>4}{'pass':>6}{'pass%':>7}{'error':>7}{'reward':>8}{'tools':>7}{'wall s':>8}")
-    for m in modes:
-        rs = [r for r in rows if r["mode"] == m]
+    print(f"\nPer-scenario summary ({out_dir})")
+    print(f"{'scenario':<14}{'mode':<22}{'variant':<11}{'n':>4}{'pass':>6}{'pass%':>7}{'error':>7}{'reward':>8}{'tools':>7}{'wall s':>8}")
+    for name, mode, var in scenarios:
+        rs = [r for r in rows if _scenario_of(r) == name]
         n = len(rs)
         p = sum(r["status"] == "pass" for r in rs)
         e = sum(r["status"] == "error" for r in rs)
         rew = [r["reward"] for r in rs if r["reward"] is not None]
-        print(f"{m:<16}{n:>4}{p:>6}{(f'{100 * p / n:.0f}%' if n else '-'):>7}{e:>7}"
+        print(f"{name:<14}{mode:<22}{var or "-":<11}{n:>4}{p:>6}{(f'{100 * p / n:.0f}%' if n else '-'):>7}{e:>7}"
               f"{(f'{sum(rew) / len(rew):.2f}' if rew else '-'):>8}"
               f"{_mean([r['n_tool_calls'] for r in rs]):>7}{_mean([r['wall_clock'] for r in rs]):>8}")
 
-    aip = sorted((r for r in rows if r["mode"] == "aip-spec" or r["mode"] in AIP_RUNTIME_MODES),
-                 key=lambda r: (r["mode"], r["task"], r["model"], r["trial"]))
-    if not aip:
+    # Per-cell signals for every scenario that mounts or publishes a skill: which skill
+    # the solver launched (so a solver that ignored the pack is visible), the AIP step
+    # signals for AIP packs, and the protocol signals for aip-runtime.
+    skilled = [(n, m, v) for n, m, v in scenarios if m not in ("noskill",)]
+    cells = sorted((r for r in rows if _scenario_of(r) in {n for n, _, _ in skilled}),
+                   key=lambda r: (_scenario_of(r), r["task"], r["model"], r["trial"]))
+    if not cells:
         return 0
-    print("\nAIP cells (aip-runtime: search hits, run/resume results, pauses, failures, done; "
-          "aip-spec: JSON step outputs, `aip` mentions)")
-    print(f"{'mode':<17}{'task':<44}{'t':>2}{'reward':>7}{'tools':>6}{'wall s':>8}  signals")
-    for r in aip:
+    print("\nPer-cell signals (aip-runtime: search hits, run/resume results, pauses, failures, done; "
+          "AIP packs mounted as a skill: JSON step outputs, `aip` mentions; every skill scenario: the skill launched)")
+    print(f"{'scenario':<12}{'task':<44}{'t':>2}{'reward':>7}{'tools':>6}{'wall s':>8}  signals")
+    kinds = {n: (m, (VARIANTS[v].is_aip if v and v in VARIANTS else m in ("aip-spec", *AIP_RUNTIME_MODES))) for n, m, v in skilled}
+    for r in cells:
+        name = _scenario_of(r)
+        mode, is_aip = kinds[name]
         s = signals(r.get("trial_dir"))
-        if r["mode"] in AIP_RUNTIME_MODES:
+        if mode in AIP_RUNTIME_MODES:
             sig = (f"skill={s['skill']} search={s['search']} run/resume={s['run_resume']} "
                    f"paused={s['paused']} failed={s['failed']} done={'yes' if s['done'] else 'NO'}")
-        else:
+        elif is_aip:
             sig = f"skill={s['skill']} json_steps={s['json_steps']} aip_mentions={s['aip_mentions']}"
+        else:
+            sig = f"skill={s['skill']}"
         reward = "-" if r["reward"] is None else f"{r['reward']:g}"
         wall = "-" if r["wall_clock"] is None else f"{r['wall_clock']:.0f}"
         tools = "-" if r["n_tool_calls"] is None else str(r["n_tool_calls"])
-        print(f"{r['mode']:<17}{r['task'][:43]:<44}{r['trial']:>2}{reward:>7}{tools:>6}{wall:>8}  "
+        print(f"{name:<12}{r['task'][:43]:<44}{r['trial']:>2}{reward:>7}{tools:>6}{wall:>8}  "
               f"{sig}{'  status=error' if r['status'] == 'error' else ''}")
     return 0
 
@@ -211,9 +234,9 @@ def main(argv: list[str]) -> int:
     if cmd == "tasks":
         return cmd_tasks(arg)
     if cmd == "to-compile":
-        return cmd_to_compile(arg, "--force" in argv[2:])
+        return cmd_to_compile(arg, variant_arg(argv[2:]), "--force" in argv[2:])
     if cmd == "check":
-        return cmd_check(arg)
+        return cmd_check(arg, variant_arg(argv[2:]))
     return cmd_report(arg)
 
 

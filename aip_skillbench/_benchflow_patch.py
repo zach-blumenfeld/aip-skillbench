@@ -33,9 +33,9 @@ CLI entry point (and the `bench` subprocess via `_bench_launcher`) gets them.
    - `AIP_SKILLBENCH_PUBLISH` (host path of one skill folder): uploaded to
      /opt/aip/packs/<name> and published with `aip publish`; the printed
      `name@revision` goes to the log. Timing key `aip_publish`.
-   - `AIP_SKILLBENCH_NUDGE` (`aip-spec` or `aip-runtime`): writes that mode's
+   - `AIP_SKILLBENCH_NUDGE` (`skill` or `aip-runtime`): writes that mode's
      memory file to /root/.claude/CLAUDE.md, which benchflow copies into the
-     sandbox user's home. Independent of the wheels (`aip-spec` installs none).
+     sandbox user's home. Independent of the wheels (`skill` installs none).
    Any failure raises: an AIP-mode trial without its client, server, or
    procedure is a different experimental condition and must not pass silently.
 
@@ -162,18 +162,20 @@ def publish_script(pack: str) -> str:
 # loads it as user memory. One text per AIP mode, kept equally short and directive;
 # `human-curated` gets none.
 NUDGE_MEMORY = {
-    "aip-spec": """\
-# AIP procedures (mandatory)
+    # `eval --mode skill --nudge`: an ablation knob, off by default. A mounted pack is
+    # activated by its own description like any Agent Skill; this text names it as the
+    # mandatory first action instead.
+    "skill": """\
+# Skills (mandatory)
 
 Your FIRST action on any task, before reading data or writing code: look at the skills
-under `~/.claude/skills/`. A skill whose SKILL.md begins with an AIP runtime block is a
-procedure graph for a task like this. If one matches the task, you MUST execute it
-exactly as the runtime block says: the start step first, each execution step's
-script with the JSON state on stdin, follow `inputs_to` and routers, answer decision
-questions yourself, and report the result from its end state. Do not skip steps and
-do not write your own solution instead. Only if no skill matches do you solve the
-task yourself.
+under `~/.claude/skills/`. If one matches the task, you MUST use it as its SKILL.md says,
+running its scripts and following its procedure rather than writing your own solution.
+Only if no skill matches do you solve the task yourself.
 """,
+    # `eval --mode aip-runtime`: on by default. Nothing task-specific is mounted, so the
+    # solver is told where to look (campaign-1, 2026-10-06: two of five cells never ran
+    # `aip search` without this).
     "aip-runtime": """\
 # AIP procedures (mandatory)
 

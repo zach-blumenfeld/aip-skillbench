@@ -1,14 +1,14 @@
-"""Sandboxed AIP authoring for `aip-skillbench convert`.
+"""Sandboxed authoring for `aip-skillbench convert --variant V`.
 
 The authoring session (`claude -p`) runs inside a throwaway workspace that holds
 only what the prompt is allowed to see:
 
-    build/authoring/<task>-<from>-<stamp>/
-    ├── .claude/skills/aip/      copy of the aip-spec authoring skill (build/skills/aip/)
+    build/authoring/<task>-<variant>-<stamp>/
+    ├── .claude/skills/<skill>/  copy of the variant's authoring skill (build/<variant>/skill/<skill>/)
     ├── inputs/
-    │   ├── skills/<name>/…      curated skills            (--from curated)
-    │   ├── environment/Dockerfile                          (--from curated)
-    │   └── instruction.md                                  (--from instruction)
+    │   ├── skills/<name>/…      the task's curated skills
+    │   ├── instruction.md       the task statement the solver gets
+    │   └── environment/         Dockerfile, the task's input files (per --stage-data), MANIFEST.md
     ├── out/<skill-name>/…       what the author writes
     └── scratch/                 functional-test inputs (not kept)
 
@@ -18,7 +18,7 @@ Code still runs with permissions skipped so the checklist can execute `aip` and 
 scripts it writes, so this is not a kernel sandbox: the enforcement is the audit.
 Every tool call is captured as a stream-json transcript and scanned for paths that
 leave the workspace; a hit fails the conversion. Prompt, transcript, audit, and
-metadata are kept next to the pack under generated-skills/<task>/_authoring/<from>/
+metadata are kept next to the pack under generated-skills/<task>/_authoring/<variant>/
 (a sibling of the mounted pack dir, so trials never see them).
 """
 
@@ -32,7 +32,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from aip_skillbench._aip import HOST_SKILLS_DIR, ROOT, read_aip_ref
+from aip_skillbench._aip import ROOT, Variant
 
 AUTHORING_BUILD = ROOT / "build" / "authoring"
 
@@ -43,9 +43,7 @@ _INPUT_IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store")
 # temp dirs, and the aip CLI it runs.
 # The AIP tool's own source: the host `aip`/`aip-spec` CLIs are editable installs of these
 # clones, so an author reading how the runtime invokes scripts lands here. Not task data.
-_TOOL_SRC_PREFIXES = tuple(
-    str(p) + "/" for p in (ROOT / ".claude" / "skills-src", ROOT / ".claude" / "skills")
-)
+_TOOL_SRC_PREFIXES = (str(ROOT / "build") + "/",)
 _ALLOWED_PREFIXES = (
     *_TOOL_SRC_PREFIXES,
 
@@ -66,11 +64,11 @@ class AuditViolation(Exception):
     pass
 
 
-def make_workspace(task: str, from_: str) -> Path:
+def make_workspace(task: str, v: Variant) -> Path:
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    ws = AUTHORING_BUILD / f"{task}-{from_}-{stamp}"
+    ws = AUTHORING_BUILD / f"{task}-{v.name}-{stamp}"
     ws.mkdir(parents=True)
-    shutil.copytree(HOST_SKILLS_DIR / "aip", ws / ".claude" / "skills" / "aip", ignore=_AIP_SKILL_IGNORE, symlinks=True)
+    shutil.copytree(v.authoring_skill, ws / ".claude" / "skills" / v.skill_name, ignore=_AIP_SKILL_IGNORE, symlinks=True)
     (ws / "inputs").mkdir()
     (ws / "out").mkdir()
     (ws / "scratch").mkdir()
@@ -139,18 +137,18 @@ def stage_environment(ws: Path, env_dir: Path, mode: str) -> list[str]:
     return staged
 
 
-def stage_curated(ws: Path, curated_root: Path, env_dir: Path | None, data_mode: str = "full") -> list[str]:
+def stage_curated(
+    ws: Path, curated_root: Path, env_dir: Path | None, instruction: Path, data_mode: str = "full"
+) -> list[str]:
+    """The task's curated skills, its instruction.md, and its environment (per data_mode)."""
     names: list[str] = []
     for src in sorted(p for p in curated_root.iterdir() if p.is_dir() and (p / "SKILL.md").exists()):
         shutil.copytree(src, ws / "inputs" / "skills" / src.name, ignore=_INPUT_IGNORE)
         names.append(src.name)
+    shutil.copy2(instruction, ws / "inputs" / "instruction.md")
     if env_dir and env_dir.is_dir():
         stage_environment(ws, env_dir, data_mode)
     return names
-
-
-def stage_instruction(ws: Path, instruction: Path) -> None:
-    shutil.copy2(instruction, ws / "inputs" / "instruction.md")
 
 
 def run_author(ws: Path, prompt: str, model: str, api_key: str | None) -> tuple[int, Path]:
@@ -247,7 +245,7 @@ def audit_transcript(transcript: Path, ws: Path) -> dict:
     return {"tool_calls": calls, "violations": outside, "ok": not outside, "total_cost_usd": result_cost}
 
 
-def finalize(ws: Path, dst_root: Path, record_dir: Path, audit: dict, meta: dict, keep_workspace: bool) -> list[str]:
+def finalize(ws: Path, v: Variant, dst_root: Path, record_dir: Path, audit: dict, meta: dict, keep_workspace: bool) -> list[str]:
     """Move out/* into dst_root, keep the authoring record beside it, drop the workspace."""
     produced: list[str] = []
     dst_root.mkdir(parents=True, exist_ok=True)
@@ -264,7 +262,7 @@ def finalize(ws: Path, dst_root: Path, record_dir: Path, audit: dict, meta: dict
         if (ws / name).exists():
             shutil.copy2(ws / name, record_dir / name)
     (record_dir / "audit.json").write_text(json.dumps(audit, indent=2) + "\n")
-    meta = {**meta, "produced": produced, "aip": read_aip_ref(), "workspace": str(ws)}
+    meta = {**meta, "produced": produced, "ref": v.read_ref(), "workspace": str(ws)}
     (record_dir / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
     if not keep_workspace:
         shutil.rmtree(ws, ignore_errors=True)
