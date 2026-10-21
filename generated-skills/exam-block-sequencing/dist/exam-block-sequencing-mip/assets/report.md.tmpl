@@ -1,0 +1,39 @@
+# Exam Block Sequencing Report
+
+## Final objective
+
+**{objective}** (minimization; lower is better). Certification: {certification}.
+
+## Score breakdown
+
+| Component | Count | Weight | Weighted |
+|---|---:|---:|---:|
+| Evening-to-morning back-to-back (eve_morn_b2b_count) | {eve} | {weights_eve} | {c_eve} |
+| Other back-to-back (other_b2b_count) | {other} | {weights_other} | {c_other} |
+| Same-day triple (same_day_triple_count) | {day} | {weights_day} | {c_day} |
+| Cross-day / 24-hour triple (cross_day_triple_count) | {cross} | {weights_24} | {c_cross} |
+| Overlapping four-slot pressure (z_three_in_four_count) | {z} | {weights_z} | {c_z} |
+| **Objective** | | | **{objective}** |
+
+## Feasibility check
+
+Recomputed from `schedule.csv` as written to disk:
+
+- Each of the {n_blocks} blocks appears exactly once; each slot holds exactly one block: passed.
+- Large blocks ({n_large}) only in early slots ({n_early}): {large_ok}.
+- Virtual blocks: {virtual}.
+- `metrics.json` was written from the on-disk schedule and re-checked by a round trip.
+
+## Solution method
+
+Iterated local search produced a warm start (objective {heur_obj}) for a mixed-integer linear program
+(assignment variables, ordered adjacent-pair flow variables, big-M linearized triplet and
+overlap costs) minimized with SCIP via PySCIPOpt. Final method: `{method}`. See `formulation.md` for the full model.
+
+{status_block}
+
+## Final schedule
+
+| slot | block |
+|---:|---:|
+{schedule_table}

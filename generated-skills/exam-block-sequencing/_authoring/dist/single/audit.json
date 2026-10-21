@@ -1,0 +1,14 @@
+{
+  "tool_calls": 39,
+  "violations": [
+    {
+      "tool": "Bash",
+      "hits": [
+        "/Users/zach/dev/aip-skillbench/.venv/bin/python"
+      ],
+      "input": "{\"command\": \"cd /Users/zach/dev/aip-skillbench/build/authoring/exam-block-sequencing-dist-20261020-161410/scratch; S=../out/exam-block-sequencing-mip/scripts/blockseq.py\\necho \\\"--- heuristic only\\\"; ./venv/bin/python $S solve --data var2/data --out var2/h --heur-seconds 3 --time-limit 0 2>&1 | tail -6; ./venv/bin/python $S audit --data var2/data --out var2/h >/dev/null && ./venv/bin/python $S rep"
+    }
+  ],
+  "ok": false,
+  "total_cost_usd": 4.6349808
+}

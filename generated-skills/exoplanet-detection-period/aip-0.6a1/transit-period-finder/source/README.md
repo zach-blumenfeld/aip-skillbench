@@ -2,168 +2,92 @@
 
 ## Provenance
 
-Compiled on 2026-10-20 into one AIP 0.6a1 skill from five curated Agent Skills that
-together describe one workflow (find a transiting planet's period under stellar
-activity). The originals are copied verbatim:
+Compiled (AIP 0.6a1) from five curated Agent Skills, copied here verbatim:
 
-| Source | Copied to |
+| Source | What it contributed |
 |---|---|
-| `inputs/skills/box-least-squares/SKILL.md` | `source/box-least-squares/SKILL.md` |
-| `inputs/skills/exoplanet-workflows/SKILL.md` | `source/exoplanet-workflows/SKILL.md` |
-| `inputs/skills/light-curve-preprocessing/SKILL.md` | `source/light-curve-preprocessing/SKILL.md` |
-| `inputs/skills/lomb-scargle-periodogram/SKILL.md` | `source/lomb-scargle-periodogram/SKILL.md` |
-| `inputs/skills/transit-least-squares/SKILL.md` | `source/transit-least-squares/SKILL.md` |
-| task statement the downstream agent receives | `source/task-instruction.md` |
+| `light-curve-preprocessing/SKILL.md` | Quality-flag conventions, outlier sigma guide, flatten window guidance, pipeline order, sine-fitting caveat |
+| `lomb-scargle-periodogram/SKILL.md` | Lomb-Scargle for the stellar-variability (rotation) period, harmonics/aliases, period ranges |
+| `box-least-squares/SKILL.md` | BLS search, autoperiod/power grids, objectives, `compute_stats` vetting (odd/even, SNR, transit count), top-peak comparison, alias issues |
+| `transit-least-squares/SKILL.md` | TLS usage, SDE/SNR thresholds, refinement window strategy, transit masking, multi-planet search, "transits without data" warning |
+| `exoplanet-workflows/SKILL.md` | Overall pipeline stages, method selection, validation thresholds, expected depths and period ranges, best practices, common issues |
 
-The source skills hold only SKILL.md files (no scripts/, references/ or assets/).
+Target task (used to shape defaults and to functional-test): a TESS 2-minute light curve
+(`time, normalized flux, quality flag, flux error`, `#` header lines) of a spotted star with a
+hidden transiting planet; write the period, rounded to 5 decimals, to a text file. The
+container has Python 3.12 with numpy 1.26, scipy 1.13, astropy 6.0, lightkurve 2.4,
+transitleastsquares 1.32.
 
-Target runtime: the task container (`python:3.12-slim` with numpy 1.26.4, scipy 1.13.1,
-astropy 6.0.1, lightkurve 2.4.2, transitleastsquares 1.32, numba 0.60, batman 2.5.2).
-The scripts import only numpy, scipy, astropy, lightkurve and transitleastsquares. They were
-tested under that pinned stack (Python 3.12 venv) and under the aip CLI's Python 3.14.
-
-## Intent
-
-The task gives one TESS light curve (time, normalized flux, quality flag 0 = good, flux
-error) with strong rotational modulation hiding a transiting planet, and asks for the
-period, written as a single number rounded to 5 decimals. The skill has to work on any
-instance of that task, so nothing about this file's answer is encoded. Every number comes
-from the data at run time.
-
-## Graph and component-kind choices
-
-```
-prepare (execution) -> search (execution) -> vet (decision) -> route-credible (router)
-   true  -> finalize (execution) -> end
-   false -> rescue (client_task) -> write-rescue (execution) -> end
-```
+## Procedure and component-kind choices
 
 | Step | Kind | Why |
 |---|---|---|
-| prepare | execution | Loading, the flag convention, non-finite removal, sigma clipping, Lomb-Scargle: deterministic rules and numerics. |
-| search | execution | Detrending, BLS/TLS searches, refinement, model fit and vetting statistics are all numeric. The window rule (fractions of the rotation period, floor 0.12 d, cap 1.5 d) and the selection rule (max BLS SDE) are deterministic. |
-| vet | decision | Whether a signal is a credible transit and which alias (P, P/2, 2P) is the true period is a judgment over many statistics. The answer space is fixed (noul + 3-label choice), and the source thresholds (SDE 6/9, SNR 7, odd/even 3 sigma, >=2 transits) sit in the criteria. |
-| route-credible | router | Credible signals take the scripted path; non-credible ones need open-ended work. |
-| finalize | execution | Picking the reported value or re-fitting the chosen alias, then formatting to 5 decimals. Deterministic. |
-| rescue | client_task | A failed automated search needs open-ended investigation (other windows, pre-whitening, wider ranges). The agent must produce a number, so it is a client task, guided by `assets/rescue.md` and `references/transit-search-methods.md`. |
-| write-rescue | execution | The same deterministic formatting for the rescue period. |
+| `inspect-light-curve` | execution | Parsing columns, counting flag values, per-subset scatter, cadence, gaps and the Lomb-Scargle rotation period are deterministic computations. |
+| `choose-flag-convention` | decision (choice) | Which flag value means "good" is a judgment over the task text and subset statistics (the sources insist conventions vary and must be verified). Fixed label set, so a decision, not free text. |
+| `detrend-and-search` | execution | Quality filter, Savitzky-Golay flatten, flare clipping, BLS search, peak de-duplication, vetting statistics and robustness re-runs are all numeric. |
+| `vet-candidates` | decision (noul + 2 choices) | Whether a peak is a credible transit (SDE/SNR/transit count/duration/rotation harmonic/stability), which rank is the planet, and whether its period is an alias are judgments over the numbers with an answer space known in advance. The source thresholds are written into the instructions. |
+| `route-on-detection` | router | Credible detection goes to scripted refinement; otherwise a hand investigation. |
+| `refine-and-write` | execution | Masked re-flatten, fine BLS, trapezoid fit, transit-timing ephemeris, rounding and writing are deterministic. |
+| `investigate-weak-signal` | client_task | When vetting fails, the next moves (other windows, durations, flag convention, TLS) depend on what the agent sees; it must still write a period. Template in `assets/investigate.md`, method detail in `references/methods.md`. |
+| `end` | end | Result: the output path plus the candidate list and search record. |
 
-The keys on the two branches differ (one producer per key), so `end` returns the keys
-common to both paths (`output_path`, `candidate`). The answer itself is the file at
-`output_path`.
+### Method decisions (deviations from the sources, with reasons)
 
-### Design decisions beyond the sources (from functional testing on the real file)
+- **BLS is the scripted search; TLS is the manual fallback.** The sources rate TLS as more
+  sensitive. Measured here, a TLS search over ~16.5k 2-minute points did not finish in 10
+  minutes (multithreaded runs hung on this test machine), and even a +-2% window took 60 s
+  single-threaded, with a coarser period (5.3570 +- 0.014 d) than BLS plus a fit. `aip run`
+  kills scripts after 60 s. BLS on 10-minute bins searches 0.5 d to baseline/2 in a few
+  seconds per window. TLS usage, parameters and thresholds are kept in `references/methods.md`
+  for the fallback, and the SDE thresholds are applied to the BLS SDE.
+- **Flatten first, then clip only upward outliers.** The sources say to remove outliers
+  before flattening at sigma 3, and at sigma 5 after flattening. On a spotted star (4% p2p
+  rotation amplitude here), a raw-flux 3-sigma clip removes rotation extrema, not outliers.
+  lightkurve's `flatten` already sigma-clips (3 sigma, 3 iterations) when it fits the trend,
+  which is the "outliers before trend removal" protection. After flattening only *upward*
+  3-sigma points (flares) are clipped. A low-side clip at 3 to 5 sigma would delete transits
+  deeper than 3 to 5 times the noise (e.g. hot Jupiters).
+- **Window rule: P_rot/4 clipped to 0.25-0.75 d.** This follows "longer than the transit,
+  shorter than the rotation period", made concrete. In testing, P_rot/3 with a 1-day cap let
+  the P_rot/2 harmonic through as a long box "transit" on a 3.2-day rotator. The ~300-500
+  cadence TESS rule of thumb from the source equals 0.4-0.7 d at 2-minute cadence, in the same
+  range.
+- **Refinement.** The sources say to refine with a narrow (+-2-10%) TLS re-search. Instead we
+  mask the transits, re-flatten (unmasked flattening suppresses depth and biases the period),
+  run a dense +-1% BLS grid, then a trapezoid least-squares fit, cross-checked against a linear
+  fit to the individual transit times. On the task file these agree within 1e-5 d (fit
+  5.35845 +- 0.00018 d, timing 5.35844 d).
+- **Vetting statistics are computed after a local polish** of each coarse peak on unbinned
+  data. Otherwise period error accumulated over many transits produces spurious odd/even
+  mismatches; this happened on a 13-transit synthetic case. `odd_even_depth_ratio` is
+  reported because a high mismatch *sigma* with both depths substantial comes from
+  detrending under fast rotation, while a ratio near 0 is the 2x-alias signature.
 
-- **Flatten window tied to the rotation period.** On the task file (rotation ~1.4 d), windows
-  of 0.14-0.6 d all recover the same transit period. A ~1 d window (701 cadences, near the
-  rotation period) returned a spurious ~7.15 d period with TLS. The source rule "longer than
-  the transit, shorter than the rotation period" is therefore enforced in code: windows are
-  0.1-0.4 x P_rot (fixed 0.25-1.0 d when no clear rotation), and the best is picked by BLS SDE.
-  `windows_agreeing_with_period` tells the vet step whether the period is robust to that choice.
-- **Transit-masked re-flatten.** Short windows give the highest SDE but shrink the depth
-  (0.7 ppt at 0.14 d vs 2.1 ppt at 0.56 d). After detection the curve is re-flattened with
-  the transits masked (lightkurve `flatten(mask=...)`), so the refinement sees the true depth.
-- **Trapezoid ephemeris fit for the final digits.** TLS and BLS grid periods are only good to a
-  fraction of the peak width (TLS `period_uncertainty` 0.015 d here). A least-squares
-  trapezoid fit over all transits, seeded by a (P, t0) grid, gives ~0.0002 d. On the task file:
-  TLS 5.3579, BLS fine grid 5.35846, fit 5.35845 +/- 0.0002. A local-quadratic-baseline variant
-  agreed within 0.2 sigma. On an injected-planet test (true P 3.71234), the fit returned 3.71302
-  +/- 0.0005 (1.3 sigma). It falls back to TLS if the fit fails or leaves the search window.
-- **Asymmetric outlier clipping.** The sources' `remove_outliers(sigma=3)` is symmetric on the
-  global flux. On a rotating star it clips rotation extremes, and on a deep hot-Jupiter
-  transit it can delete the transit. The scripts clip the upper side at 3 sigma (pre-flatten,
-  relative to a running median shorter than P_rot/6) and at 5 sigma after flattening,
-  following the source's "3 for initial, 5 after flattening". Negative points are clipped
-  only as isolated single cadences beyond 5 sigma.
-- **flag_convention start input.** The source says conventions vary (flag 0 can be good or bad),
-  so the caller states it from the task text. The script stops with a clear message if the
-  chosen convention leaves no data.
-- **TLS SDE inside the +/-5% refinement window is meaningless** (4.8 on the real file), so only
-  the broad-search SDE is reported.
+## Functional test record
 
-## Completeness check (source item -> where it lives)
+`aip run` with the task's file and the task statement: flag convention `zero_is_good`.
+Search window 0.35 d (P_rot 1.40 d). Top candidate 5.3600 d: SDE 22.0, SNR 21.9, 4
+transits, odd/even ratio 0.98, no secondary, stable across 0.21/0.52 d windows. The other
+peaks are its 2x, 0.5x and 1.5x aliases. Output `5.35845`. Synthetic checks (scratch only):
+an injected 3.77120 d planet on a 3.19 d rotator with 5% bad flags, NaNs and flares gave
+3.77124. An injected 1.93055 d planet on a 0.85 d rotator gave 1.93054. A planet-free
+rotator went down the `false` branch, where the fallback wrote a low-confidence value. Also
+tested: the `double`/`half` alias factors, inverted flags (`nonzero_is_good`), and a
+3-column CSV with a header row and un-normalised flux.
 
-Legend: P = prepare.py, S = search.py, F = finalize.py, V = vet decision, R =
-references/transit-search-methods.md, A = anti_patterns, T = assets/rescue.md, Q = requires.
+## Deliberate-drop log
 
-### box-least-squares
-- BLS concept, the four searched parameters, Kovács 2002 basis: R (BLS section); S uses BLS.
-- Installation (astropy): Q.
-- Basic usage, autopower vs power, custom grids, multiple durations: R; S (`autoperiod` + `power` with a duration list).
-- "Period grid quality matters": R; S uses `frequency_factor=1.0` and a 20001-point fine grid.
-- Objectives likelihood / snr, SNR robust to correlated noise: R; S uses snr for the scan and likelihood for the fine grid.
-- Complete example: S/R. The plotting part is dropped (below).
-- compute_stats, depth/odd/even/transit_count, odd-even > 3 x depth_err warning: S `bls_stats`; V criteria; R table.
-- Validation criteria (SNR > 7, low odd-even, multiple transits, reasonable duration): V signal_credible.
-- autoperiod grid, finer grids around candidates, grid matters more than for LS: S; R.
-- Comparing top 5 peaks: R (BLS section); S's window scan and alias table give the automated comparison.
-- Phase-folded light curve: replaced by numeric phase statistics (depth_at_phase_0p5 at P and 2P) in S/V; R says to fold in manual work.
-- BLS vs TLS pros/cons, "try both": R; S runs TLS (primary) and BLS (scan + cross-check).
-- Integration-with-preprocessing pipeline 1-5 and key considerations: the procedure order; A.
-- Common issues (no clear peak, 2x/0.5x, high odd-even), causes and fixes: R common problems; V period_choice; T.
-- When to use BLS/TLS/LS: R; do_not_use_when (rotation-only goals).
+Each source item not carried into the body, a script, the template, or `references/methods.md`:
 
-### exoplanet-workflows
-- Overview and key stages (load, QC, preprocess, search, validate, refine): the step sequence.
-- Critical decisions (outliers yes but gentle; detrend because rotation masks transits; balance): P/S clipping rules; A.
-- Algorithm choice (TLS best, LS exploration, BLS alternative, TLS generally better than BLS): R; S makes TLS primary.
-- Period range by planet type (hot Jupiter 0.5-10 d etc.) and "wider = slower": R; S searches 0.3 d to baseline/2.
-- When to refine (narrow search around the candidate): S (+/-5% TLS, fine BLS, fit).
-- Method sections (TLS/LS/BLS use-when, advantages, disadvantages): R.
-- Signal validation (SDE > 9 / > 6, SNR > 7, warning signs, how to validate): V; R table.
-- Multi-planet strategy and transit_mask: R; T.
-- Common issues (low SDE, 2x/0.5x, flux_err required, results vary with preprocessing): R; A; S window agreement metric.
-- Expected depths (hot Jupiter 1-3 %, super-Earth 0.1-0.3 %, Earth 0.01-0.1 %): R; V depth plausibility.
-- Period range guidelines incl. habitable zone: R.
-- Best practices: flux_err always (P/S, A); check flag convention (P flag_convention input); sigma 3 then 5 (P/S); refine (S); validate (V); data gaps -> aliasing (V, A); document (prep_summary, candidate, rescue_notes). "Visualize each step" is dropped (below).
-
-### light-curve-preprocessing
-- Outlier removal with lightkurve, sigma 2/3/5 meanings: R; P/S implement the upper-side variant (see design decisions).
-- Manual median/std clipping: P (running-median residual, MAD sigma).
-- Flatten with window_length, typical window ranges, SG preserves transits: S `flatten`; R.
-- Iterative sine fitting, plus its warning that it removes periodic signals: R (code + warning); T step 3.
-- Quality flags: the TESS flag==0 good convention, the alternative flag==0 bad, "verify your format": P flag_convention; R.
-- Pipeline order (flags -> outliers -> trend -> optional second pass): P then S.
-- Principles (flux_err, preserve transit shape, don't over-process, verify): P/S; A.
-- Parameter selection (sigma ranges, window longer than transit / shorter than rotation, two passes): S window rule (MIN_WINDOW_DAYS, fractions of P_rot); P/S two passes.
-- Preprocessing for exoplanet detection (sigma 3 or 5, appropriate window, don't over-smooth): P/S.
-- Best practices 1-5: P/S order; S window rule.
-
-### lomb-scargle-periodogram
-- LS for unevenly sampled data; lightkurve `to_periodogram`, `period_at_max_power`: P uses astropy `LombScargle` (the engine behind lightkurve's LS periodogram) for the rotation period; R gives the lightkurve form.
-- Plot with view='period': R (one comment). Plotting otherwise dropped.
-- Period range selection (rotation 0.1-100 d, transits 0.5-50 d, EBs, pulsations): P (0.1 d to min(100 d, baseline/2)); R.
-- Interpreting power, harmonics, aliases: S `period_matches_rotation_harmonic`; V; R.
-- Model fitting (`pg.model`): R (sine-fitting recipe).
-- When to use LS vs TLS/BLS, "TLS after LS": the procedure (LS for rotation, TLS for transits).
-
-### transit-least-squares
-- Install; flux_err CRITICAL: Q; S always passes flux_err; A.
-- Usage via lightkurve -> remove_outliers -> flatten -> TLS: P/S.
-- Result attributes (period, period_uncertainty, T0, depth, snr, SDE): S candidate; R.
-- Explicit period range: S (0.3 d to baseline/2).
-- Refinement strategy (broad then +/-2-10 %): S (+/-5 %, oversampling 10); R.
-- Advanced options (oversampling_factor, duration_grid_step, T0_fit_margin): R; S uses oversampling_factor.
-- Phase-folding attributes, model light curve attributes: R.
-- Transit masking for further searches: S (masked re-flatten); R multi-planet.
-- SDE and SNR interpretation thresholds: V; R.
-- "X of Y transits without data" warning -> check 2P: V period_choice (empty_transit_count alone is not evidence); A; R.
-- Workflow considerations and typical parameter ranges: the procedure; S constants.
-- Multiple-planet search strategy: R.
-- Common issues (flux_err, 2x/0.5x, low SDE -> less aggressive flattening, gaps during transits): R; T.
-
-### task-instruction.md
-- Input columns (time MJD, flux, flag 0 = good, flux error): P loader default order and header parsing; flag_convention.
-- Filter, remove activity, find the period: prepare / search.
-- Output: one number in days, 5 decimals, at /root/period.txt: F / write_period.py (`f"{p:.5f}"`); A.
-
-## Deliberate drops
-
-| Dropped | Rationale |
-|---|---|
-| All matplotlib plotting snippets and "visualize each step / plot before and after" advice | The run is headless and autonomous. Nobody looks at the plots. Their purpose (check the transit survives, check folds, compare preprocessing) is covered by numeric checks: depth per window in `window_scan`, depth_at_phase_0p5, odd/even, window agreement. The rescue reference still says to phase-fold when working by hand. |
-| `pip install` commands | The container already has the packages; `requires` declares them and the client checks before the first script. |
-| Documentation links, tutorial section numbers, paper citations (Kovács 2002, Hippke & Heller 2019, Hartman & Bakos 2016) | Background. Not actionable at run time. |
-| Introductory prose ("BLS is a statistical tool...", "LS extends the classical periodogram...") | The agent already knows this. |
-| Duplicate statements across the five skills (preprocessing order, 2x/0.5x aliasing, flux_err warnings repeated 3-4 times) | Kept once each, in the place they act (script, decision criterion, anti-pattern, or reference). |
-| `print(...)` formatting in examples | Superseded by the structured JSON outputs. |
+| Source item | Where | Why dropped |
+|---|---|---|
+| `pip install ...` / Dependencies blocks | all five | Install steps don't apply: the container provides the packages, and `requires` declares what the scripts import. |
+| Plotting snippets (`plt.plot`, `lc.plot()`, `pg.plot`), "visualize each step", "plot before and after", "visual inspection / phase-folded plots" | all five | The consumer is headless and autonomous. The checks a plot supports are computed instead: per-transit points and depths, odd/even depths and ratio, depth at phase 0.5, depth folded at P/2, multi-window stability, residual scatter. |
+| Literature citations (Kovacs+2002, Hippke & Heller 2019, Hartman & Bakos 2016) and documentation / tutorial URLs, lightkurve tutorial section numbers | BLS, TLS, workflows, preprocessing, LS | Bibliographic; no actionable content. |
+| Overview / introductory prose ("BLS models a transit as an upside-down top hat", "LS extends the classical periodogram to unevenly sampled data", "Preprocessing is essential...") | all five | Background the agent already knows; the actionable parts are in the steps. |
+| "Document your workflow - reproducibility is key" | workflows | Covered structurally: every step returns its parameters (`search_summary`, `refine_summary`). |
+| BLS/TLS pros and cons lists, "Try both and compare" | BLS, workflows, TLS | Folded into the method choice above and the fallback (TLS on demand). Running both on every run would exceed the 60 s script budget for no gain on a clear detection. |
+| Habitable-zone period ranges (200-400 d Sun-like, 10-50 d M dwarf), warm planets 10-100 d | workflows | Kept as context in `references/methods.md`. A single-sector light curve cannot constrain periods above ~baseline/2, so they do not set defaults. |
+| Manual median/std outlier recipe | preprocessing | Superseded by lightkurve's sigma clipping on the flattened flux (the same method, applied after detrending for the reason above). The sigma guide is kept in `references/methods.md`. |
+| Iterative sine fitting as a detrender | preprocessing | Not used by the scripts: the source warns it removes periodic signals, and it needs many iterations for evolving spots. Kept in `references/methods.md` with the warning. |
+| Lomb-Scargle `pg.model` fitting example | LS | Same as sine fitting; documented in the reference, not used by the scripts. |

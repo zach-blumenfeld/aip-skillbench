@@ -1,0 +1,33 @@
+{
+  "task": "powerlifting-coef-calc",
+  "variant": "aip-0.6a1",
+  "label": "single",
+  "single": true,
+  "author_model": "claude-opus-5-5",
+  "claude_exit": 0,
+  "stage_data": "full",
+  "stage_instruction": true,
+  "started_workspace": "powerlifting-coef-calc-aip-0.6a1-20261020-170417",
+  "recorded_at": "2026-10-20T17:15:35",
+  "produced": [
+    "powerlifting-score-sheet"
+  ],
+  "ref": {
+    "variant": "aip-0.6a1",
+    "kind": "aip",
+    "skill_name": "aip",
+    "aip": {
+      "remote": "git@github.com:zach-blumenfeld/aip.git",
+      "ref": "v0.6a1",
+      "sha": "7d0655edda71f0d67749659c2f02c59ddb8b2ab0"
+    },
+    "aip_spec": {
+      "remote": "git@github.com:zach-blumenfeld/aip-spec.git",
+      "ref": "v0.6a1",
+      "sha": "9edbf485c0b0631ed71014d9b551fced21cac8a6"
+    },
+    "format_version": "0.6a1",
+    "recorded_at": "2026-10-20T14:44:01"
+  },
+  "workspace": "/Users/zach/dev/aip-skillbench/build/authoring/powerlifting-coef-calc-aip-0.6a1-20261020-170417"
+}

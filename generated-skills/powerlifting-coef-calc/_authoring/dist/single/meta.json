@@ -1,0 +1,28 @@
+{
+  "task": "powerlifting-coef-calc",
+  "variant": "dist",
+  "label": "single",
+  "single": true,
+  "author_model": "claude-opus-5-5",
+  "claude_exit": 0,
+  "stage_data": "full",
+  "stage_instruction": true,
+  "started_workspace": "powerlifting-coef-calc-dist-20261020-170258",
+  "recorded_at": "2026-10-20T17:09:57",
+  "produced": [
+    "powerlifting-scores-xlsx"
+  ],
+  "ref": {
+    "variant": "dist",
+    "kind": "dist",
+    "skill_name": "skill-distillation",
+    "skill_source": {
+      "path": "distillation",
+      "repo_sha": "acb061d62f3f211bfc2c8a7491f20eed381ffd79",
+      "dirty": false
+    },
+    "format_version": null,
+    "recorded_at": "2026-10-20T14:44:03"
+  },
+  "workspace": "/Users/zach/dev/aip-skillbench/build/authoring/powerlifting-coef-calc-dist-20261020-170258"
+}

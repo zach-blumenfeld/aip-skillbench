@@ -1,0 +1,40 @@
+{
+  "plaintiffs": [
+    {
+      "name": "Full name as the plaintiff gives it (person, business, or public entity)",
+      "phone": "Phone exactly as given in the case (keep its digits/format); empty if none",
+      "street": "Street address only, e.g. 655 S Fair Oaks Ave",
+      "city": "City",
+      "state": "2-letter state, e.g. CA",
+      "zip": "ZIP code",
+      "mailing_street": "Only if a DIFFERENT mailing address is stated; else empty",
+      "mailing_city": "", "mailing_state": "", "mailing_zip": "",
+      "email": "Email if given; else empty"
+    }
+  ],
+  "defendants": [
+    {
+      "name": "Defendant's full name",
+      "phone": "As given; empty if none",
+      "street": "", "city": "", "state": "", "zip": "",
+      "mailing_street": "Only if a different mailing address is stated", "mailing_city": "", "mailing_state": "", "mailing_zip": "",
+      "agent": {
+        "name": "ONLY when the defendant is a corporation, LLC, or public entity: the person/agent for service of process; else omit or empty",
+        "job_title": "", "street": "", "city": "", "state": "", "zip": ""
+      }
+    }
+  ],
+  "claim_amount": "Amount claimed as a number, e.g. 1500 (no court costs or service fees)",
+  "why_owed": "Item 3a: one or two plain sentences on why the defendant owes the money, in the plaintiff's first-person voice, using the case's own facts",
+  "incident_date": "Item 3b: the single date it happened, ONLY if the case gives one specific date; else empty",
+  "period_start": "Item 3b: start of the period when the case gives a span instead of one date; else empty",
+  "period_through": "Item 3b: end of that period; else empty",
+  "how_calculated": "Item 3c: how the amount was calculated, from the case's facts (e.g. which document lists the amount, what was added up)",
+  "needs_more_space": "true only if 3a/3c cannot fit (about 4-5 lines of ~100 chars each) and an attachment will be made; else false",
+  "asked_no_explanation": "Item 4: only if the plaintiff did NOT ask the defendant to pay, why not; else empty",
+  "venue_other_specify": "Item 5e text, only when the venue basis is 'other'; else empty",
+  "venue_zip": "Item 6: ZIP of the place the venue box refers to, if known (filing where the defendant lives -> the defendant's ZIP; where the contract was made/injury happened -> that place's ZIP); else empty",
+  "public_claim_filed_date": "Item 8: date a written claim was filed with the public entity, only when suing one; else empty",
+  "court_name_address": "Page 1 court name and street address, ONLY if the case states the court; else empty",
+  "filing_date": "The date the plaintiff signs/files the form, as stated in the case; else empty"
+}

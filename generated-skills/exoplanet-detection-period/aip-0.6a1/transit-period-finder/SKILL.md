@@ -1,6 +1,6 @@
 ---
 name: transit-period-finder
-description: Find a transiting exoplanet's orbital period in a TESS/Kepler light curve dominated by stellar activity (starspot rotation, flares). Filters quality flags and outliers, detrends with a rotation-aware Savitzky-Golay flatten, searches with Transit Least Squares (BLS and Lomb-Scargle cross-checks), vets SDE/SNR/odd-even/aliases, refines by transit-model fit, and writes the period in days rounded to 5 decimals. Use for "find the exoplanet period" tasks on a time/flux/flag/flux_err text file.
+description: Find a transiting exoplanet's orbital period in a TESS/Kepler/K2 light curve dominated by stellar variability (starspot rotation, flares). Quality-flag filtering, flare clipping, rotation-aware Savitzky-Golay flattening (lightkurve), Box Least Squares search with SDE/SNR/odd-even/alias vetting, transit-masked refit, and writing the period rounded to 5 decimals. Use for "find the exoplanet period", detrending light curves before BLS/TLS, or transit-search troubleshooting.
 metadata:
   aip-version: "0.6a1"
 ---
@@ -27,25 +27,25 @@ The state starts as the start step's `inputs` and flows along `inputs_to`; each 
 
 ```yaml
 purpose: >
-  Recover the orbital period of a transiting exoplanet hidden under strong stellar
-  variability in a space-telescope light curve, and write it to a file as days rounded
-  to 5 decimals. Scripts do the deterministic work: column/flag-aware loading, upper-side
-  outlier clipping that cannot delete transits, a Lomb-Scargle rotation measurement that
-  sets the flatten windows (longer than a transit, shorter than the rotation), a BLS
-  window scan, a TLS broad search, a transit-masked re-flatten, TLS refinement, a
-  trapezoid ephemeris fit for the final digits, and alias/odd-even statistics. The agent
-  judges whether the signal is a credible transit and which alias is the true period;
-  a non-credible result goes to a guided manual rescue.
+  Find the orbital period of a transiting exoplanet hidden under strong stellar variability
+  (starspot rotation, pulsation, drift) in a space-telescope light curve (TESS/Kepler/K2 text
+  table of time, flux, quality flag, flux error), and write it to a file rounded as the task
+  asks. Scripts do the deterministic work: read and summarise the file, quality-filter,
+  flatten the variability with a rotation-aware Savitzky-Golay window, clip flares, run a Box
+  Least Squares search with alias and robustness diagnostics, then mask the transits,
+  re-flatten, and refine the period with a trapezoid fit cross-checked by transit timing.
+  Decisions settle the flag convention and whether the top peak is a real transit at its
+  true period (not a rotation harmonic or a 2x / 0.5x alias).
 
 trigger_when:
-  - A task asks for the period of an exoplanet, transit, or planet candidate from a light curve (TESS, Kepler, K2).
-  - A light curve shows rotational modulation, starspots, or other stellar activity hiding transits.
-  - The input is a text/CSV table of time, flux, quality flag, and flux uncertainty, and the output is a single period value.
+  - A task asks for the period of a transiting exoplanet from a light curve file.
+  - A light curve shows rotational modulation or other stellar activity that hides transits and must be detrended before a transit search.
+  - Planning or debugging a quality-filter, outlier, detrend, BLS/TLS period-search pipeline on TESS, Kepler, or K2 photometry.
 
 do_not_use_when:
-  - The goal is the stellar rotation or pulsation period itself, not a transiting planet (use a plain Lomb-Scargle periodogram).
+  - The goal is the stellar rotation or pulsation period itself (use a Lomb-Scargle periodogram on the undetrended flux instead).
   - The data are radial velocities or astrometry rather than photometry.
-  - Full planet characterization (radius, inclination, MCMC posteriors) is required beyond the period.
+  - Several planets must be characterised; this procedure reports one period (mask it and rerun for more).
 
 requires:
   interpreter:
@@ -56,221 +56,234 @@ requires:
     - scipy
     - astropy
     - lightkurve
-    - transitleastsquares
 
 steps:
-  - name: prepare
+  - name: inspect-light-curve
     kind: execution
-    description: Load the light curve, apply quality flags, drop non-finite rows, clip outliers (upper 3 sigma; lower only isolated >5 sigma single cadences), and measure the stellar rotation period with Lomb-Scargle.
+    description: Read the table and summarise columns, flag values, scatter per flag subset, cadence, gaps, and the dominant stellar-variability period (Lomb-Scargle).
     inputs:
       - name: lc_path
         type: string
-        description: >
-          Absolute path of the light-curve file as given by the task (e.g. /root/data/tess_lc.txt).
-          Whitespace or comma separated with '#' comments; '# columnN: name' headers map the
-          columns, otherwise the order is time, flux, quality flag, flux error.
-      - name: flag_convention
-        type: string
-        description: zero_is_good (TESS standard, and what the task statement says when it reads "0 means good data") or nonzero_is_good for exports where flag 0 marks bad data. Take it from the task statement; if it is silent use zero_is_good, and switch only if the script reports that the convention leaves no data.
-      - name: work_dir
-        type: string
-        description: Writable scratch directory for intermediate .npz files, outside the skill folder (e.g. /root/transit_work).
+        description: Path to the light-curve text file (task container path, e.g. /root/data/tess_lc.txt). Columns time, flux, quality flag, flux error; '#' lines are headers.
       - name: output_path
         type: string
-        description: Where the task wants the period written (e.g. /root/period.txt). Not used by this step; carried to the writing step.
-    script: scripts/prepare.py
-    timeout: 300
+        description: Where the period must be written (e.g. /root/period.txt).
+      - name: task_statement
+        type: string
+        description: The task text verbatim, including what it says about columns, flag meaning, and output format.
+      - name: period_min
+        type: float
+        description: Shortest trial period in days; 0 means the default 0.5 d.
+      - name: period_max
+        type: float
+        description: Longest trial period in days; 0 means half the baseline (two transits needed).
+    script: scripts/inspect_lc.py
     outputs:
-      - name: clean_file
-        type: string
-        description: .npz of the cleaned, not detrended light curve (time, flux, flux_err).
-      - name: rotation_period_days
-        type: float
-        description: Strongest Lomb-Scargle period in 0.1 d to min(100 d, baseline/2), taken as the stellar activity timescale.
-      - name: rotation_power
-        type: float
-        description: Normalized Lomb-Scargle power of that peak (>=0.1 means clear rotational modulation).
-      - name: prep_summary
+      - name: data_summary
         type: object
-        description: Column map, points removed per stage, cadence, baseline, gaps, whether flux was median-normalized or errors estimated, variability and white-noise levels in ppt.
-    inputs_to: search
+        description: Columns, flag_value_counts, flag_zero_subset / flag_nonzero_subset (count, p2p_scatter, std), baseline, cadence, gaps, stellar_variability (period_days, amplitude, significant).
+    inputs_to: choose-flag-convention
 
-  - name: search
-    kind: execution
-    description: Flatten with windows tied to the rotation period and pick the best by BLS SDE, TLS broad search, transit-masked re-flatten, TLS +/-5% refinement, BLS cross-check, trapezoid ephemeris fit, and vetting statistics for P, P/2 and 2P.
-    inputs:
-      - name: clean_file
-        type: string
-      - name: rotation_period_days
-        type: float
-      - name: rotation_power
-        type: float
-      - name: work_dir
-        type: string
-    script: scripts/search.py
-    timeout: 1500
-    outputs:
-      - name: candidate
-        type: object
-        description: >
-          period_days (fitted, unrounded), period_uncertainty_days, period_source
-          (trapezoid_fit or tls_refined), tls_refined_period_days, bls_crosscheck_period_days,
-          broad_search_period_days, t0, duration_hours, depth_ppt, tls_sde_broad, tls_snr,
-          tls_odd_even_mismatch_sigma, transit_count, distinct_transit_count,
-          empty_transit_count, rotation period/power, period_matches_rotation_harmonic,
-          flatten/refine window, windows_agreeing_with_period, window_scan (per-window BLS
-          period, depth, SDE) and aliases {reported, half, double} each with depth_ppt,
-          depth_snr, odd/even depths, odd_even_mismatch_sigma, depth_at_phase_0p5 (ppt, snr),
-          transits_with_data and transits_expected.
-      - name: flat_file
-        type: string
-        description: .npz of the transit-masked flattened light curve used for refinement.
-      - name: candidate_period_days
-        type: float
-        description: The search's period before alias adjudication.
-    inputs_to: vet
-
-  - name: vet
+  - name: choose-flag-convention
     kind: decision
-    description: Judge whether the candidate is a credible transit signal and whether the true period is the reported one or its half/double alias.
+    description: Decide which rows the quality flag marks as good.
     inputs:
-      - name: candidate
+      - name: data_summary
         type: object
-        description: The search result with its vetting statistics.
-      - name: prep_summary
-        type: object
-        description: Data-preparation summary (baseline, gaps, noise levels).
+      - name: task_statement
+        type: string
     questions:
-      signal_credible:
-        type: noul
-        instructions: >
-          Is there a credible periodic transit signal at the candidate period (or its
-          alias)? Weigh tls_sde_broad (>9 very strong, >6 strong, <6 weak/possible false
-          positive), tls_snr or aliases.reported.depth_snr (>7 reliable), at least 2
-          transits with data (distinct_transit_count / transits_with_data), a duration
-          that is hours rather than a large fraction of the period, a depth that is
-          plausible (planets ~0.01-3%), windows_agreeing_with_period (most windows
-          finding P, P/2 or 2P means the signal survives preprocessing), and
-          period_matches_rotation_harmonic (a candidate at the rotation period or a
-          harmonic is residual activity unless the depth/shape is clearly transit-like).
-          An odd/even mismatch alone does not make it non-credible: that is an alias
-          question below.
-        criteria:
-          true: SDE >= 6 and SNR >= 7 with >= 2 transits, and not explained by rotation residuals or a single artifact.
-          false: SDE < 6, SNR < 7, fewer than 2 transits with data, the period equals a rotation harmonic with no transit-like dip, or windows disagree so the period depends on preprocessing.
-      period_choice:
+      flag_convention:
         type: choice
         instructions: >
-          Which period is the planet's true orbital period? Use the aliases block:
-          aliases.reported.depth_at_phase_0p5 is the dip halfway between reported
-          transits; aliases.double.depth_at_phase_0p5 is the depth of the in-between
-          transits if the period were 2P; odd/even depths compare alternating transits.
-          Default to reported when evidence is absent (for example the in-between epochs
-          fall in data gaps; empty_transit_count > 0 alone is not evidence for 2P).
-          If signal_credible is false, answer reported.
+          Which rows does the quality-flag column mark as good data? Conventions vary by source,
+          so verify rather than assume. An explicit statement in the task ("0 means good data")
+          decides it. Otherwise standard TESS/Kepler files use 0 = good; confirm with the subset
+          statistics: the good subset normally holds most rows and has the lower p2p_scatter.
+          If there is no flag column (flag_value_counts is null), answer ignore_flags.
         criteria:
-          reported: Alternate transits have equal depths (odd_even_mismatch_sigma < 3), the 2P alias's phase-0.5 dip equals the reported depth (the in-between transits are real), and there is no equal dip halfway between reported transits.
-          double: Alternate transits differ (reported odd_even_mismatch_sigma >= 3, e.g. an eclipsing binary's primary/secondary), or the in-between epochs have data and show no dip (aliases.double.depth_at_phase_0p5_snr < 3 while aliases.double.depth_snr is high).
-          half: An equally deep dip sits halfway between reported transits (aliases.reported.depth_at_phase_0p5 comparable to depth_ppt with snr >= 7) and the half alias's odd/even depths agree.
+          zero_is_good: Rows with flag 0 are good; drop every non-zero flag (standard TESS/Kepler).
+          nonzero_is_good: Rows with a non-zero flag are good; drop flag 0 (some exported files).
+          ignore_flags: No usable flag column, or the flags carry no quality meaning; keep all finite rows.
     thresholds:
-      signal_credible: 0.2
-      period_choice: 0.7
-    inputs_to: route-credible
+      flag_convention: 0.8
+    inputs_to: detrend-and-search
 
-  - name: route-credible
-    kind: router
-    description: Credible signals are finalized by script; non-credible ones go to a manual rescue.
-    branch_on: signal_credible
-    branches:
-      "true": finalize
-      "false": rescue
-
-  - name: finalize
+  - name: detrend-and-search
     kind: execution
-    description: Take the reported period or re-fit the chosen alias (2P or P/2), then write it rounded to 5 decimals as a single number.
+    description: Quality-filter, flatten stellar variability (window P_rot/4 clipped to 0.25-0.75 d), clip upward outliers, run BLS on 10-min bins over the period range, and report the top 5 distinct peaks with vetting statistics plus a two-window robustness check.
     inputs:
-      - name: period_choice
+      - name: lc_path
         type: string
-      - name: candidate
+      - name: flag_convention
+        type: string
+      - name: data_summary
         type: object
-      - name: flat_file
+      - name: period_min
+        type: float
+      - name: period_max
+        type: float
+    script: scripts/search_transits.py
+    outputs:
+      - name: candidates
+        type: list[*]
+        description: Ranked BLS peaks (rank 1 = highest power), each polished on unbinned data, with period, t0, duration, depth, depth_snr, sde, n_transits_with_data, odd/even depths, mismatch sigma and depth ratio, secondary depth at phase 0.5, rotation_relation, period_over_top_period.
+      - name: search_summary
+        type: object
+        description: Points kept/removed, flatten window, residual scatter, period and duration grids, and robustness (top period under a 0.6x and 1.5x window).
+    inputs_to: vet-candidates
+
+  - name: vet-candidates
+    kind: decision
+    description: Judge whether a real transit was found, which candidate it is, and whether its true period is the peak period or an alias.
+    inputs:
+      - name: candidates
+        type: list[*]
+      - name: search_summary
+        type: object
+    questions:
+      transit_detected:
+        type: noul
+        instructions: >
+          Does at least one candidate show a credible periodic transit? Credible means SDE > 6
+          (SDE > 9 is very strong), depth_snr > 7, at least 2 transits with data, a duration that
+          is a small fraction of the period (duration_over_period below ~0.1), and a period that is
+          not simply a rotation harmonic (rotation_relation set) unless its transit statistics are
+          far stronger than residual variability would give. A top period that survives both
+          robustness windows supports detection; a top period that jumps between windows to
+          rotation-scale values argues against it.
+        criteria:
+          true: Some candidate meets the SDE, SNR and transit-count thresholds with a transit-like duration.
+          false: No candidate does, or the only strong peaks are rotation harmonics or unstable across windows.
+      candidate_rank:
+        type: choice
+        instructions: >
+          Which candidate is the planet? Default to rank1. Pass over a higher-ranked peak only if
+          it is a rotation harmonic, has inconsistent odd/even depths (odd_even_depth_ratio below
+          ~0.3) that a 2x alias does not explain, has a long box duration matching residual
+          variability, or is an alias of a better
+          candidate (period_over_top_period near 0.5, 1.5, 2, or 3 of the real one). Peaks at
+          2x / 0.5x / 1.5x of the planet period are aliases of it, not separate planets. If
+          transit_detected is false, answer rank1.
+        criteria:
+          rank1: The highest-power peak.
+          rank2: Second peak.
+          rank3: Third peak.
+          rank4: Fourth peak.
+          rank5: Fifth peak.
+      alias_factor:
+        type: choice
+        instructions: >
+          Is the chosen candidate's period the true orbital period, or an alias? Use its own
+          statistics. If odd_even_depth_ratio is below ~0.3 (one of depth_odd / depth_even near
+          zero, usually with odd_even_mismatch_sigma > 3), alternate "transits" are empty, so the
+          true period is double. A high mismatch sigma with both depths substantial (ratio above
+          ~0.6) at high SNR comes from detrending distortion under fast rotation, not an alias.
+          If secondary_depth_at_phase_0p5 is comparable to depth (large secondary_snr, similar
+          depth), the transits recur at half the period, so the true period is half. Otherwise
+          the period is as found. Epochs lost in data gaps (n_transits_with_data below
+          n_transit_epochs_in_baseline, zero entries in points_per_transit) do not by themselves
+          make it an alias; decide on the odd/even and phase-0.5 evidence. If transit_detected is
+          false, answer as_found.
+        criteria:
+          as_found: Odd and even depths agree within 3 sigma and there is no comparable dip at phase 0.5.
+          double: Alternate events are missing (odd_even_depth_ratio below ~0.3); true period is 2x.
+          half: An equal dip sits at phase 0.5; true period is 0.5x.
+    thresholds:
+      transit_detected: 0.2
+      candidate_rank: 0.7
+      alias_factor: 0.7
+    inputs_to: route-on-detection
+
+  - name: route-on-detection
+    kind: router
+    description: A vetted transit goes to refinement; a weak or ambiguous search goes to a hand investigation.
+    branch_on: transit_detected
+    branches:
+      "true": refine-and-write
+      "false": investigate-weak-signal
+
+  - name: refine-and-write
+    kind: execution
+    description: Mask the chosen transits, re-flatten, refine with a dense BLS grid and a trapezoid least-squares fit cross-checked by a linear transit-timing ephemeris, then write the period rounded to 5 decimals to output_path.
+    inputs:
+      - name: lc_path
+        type: string
+      - name: flag_convention
+        type: string
+      - name: search_summary
+        type: object
+      - name: candidates
+        type: list[*]
+      - name: candidate_rank
+        type: string
+      - name: alias_factor
         type: string
       - name: output_path
         type: string
-    script: scripts/finalize.py
-    timeout: 300
+    script: scripts/refine_period.py
     outputs:
-      - name: final_period_days
+      - name: period_days
         type: float
-        description: The final period in days (unrounded).
+        description: Refined orbital period in days (unrounded).
       - name: period_text
         type: string
-        description: Exactly what was written to output_path, e.g. "2.44535".
-      - name: final_basis
-        type: string
-        description: How the period was obtained (fit, alias re-fit, or fallback).
+        description: Exactly what was written to output_path, the period rounded to 5 decimals.
+      - name: refine_summary
+        type: object
+        description: Method used, uncertainty, fine-BLS / fit / timing periods and their disagreement, fitted depth and T14, per-transit times, O-C and depths.
     inputs_to: end
 
-  - name: rescue
+  - name: investigate-weak-signal
     kind: client_task
-    description: Find the period by hand with alternative detrending and search settings when the automated result is not credible.
+    description: Search by hand (other flag convention, windows, durations, TLS, aliases), then write the best-supported period rounded to 5 decimals.
     inputs:
-      - name: candidate
-        type: object
-      - name: prep_summary
-        type: object
-      - name: clean_file
+      - name: lc_path
         type: string
-      - name: flat_file
-        type: string
-      - name: work_dir
-        type: string
-    template: assets/rescue.md
-    references:
-      - path: references/transit-search-methods.md
-        description: Lightkurve/TLS/BLS/Lomb-Scargle code, preprocessing parameters (sigma, flatten windows, masking, sine pre-whitening), validation thresholds, alias diagnosis, expected depths and period ranges, multi-planet masking. Load before trying alternatives.
-    outputs:
-      - name: rescue_period_days
-        type: float
-        description: Best-supported period in days, unrounded.
-      - name: rescue_notes
-        type: string
-        description: What was tried, the chosen signal's SDE/SNR/transit count/odd-even, and why it wins.
-    inputs_to: write-rescue
-
-  - name: write-rescue
-    kind: execution
-    description: Write the rescue period rounded to 5 decimals as a single number.
-    inputs:
-      - name: rescue_period_days
-        type: float
       - name: output_path
         type: string
-    script: scripts/write_period.py
-    timeout: 60
+      - name: task_statement
+        type: string
+      - name: data_summary
+        type: object
+      - name: search_summary
+        type: object
+      - name: candidates
+        type: list[*]
+    template: assets/investigate.md
+    references:
+      - path: references/methods.md
+        description: Flattening, Lomb-Scargle, BLS and TLS call patterns and parameters, validation thresholds (SDE, SNR, odd/even), alias checks, expected depths and period ranges, common failure causes. Load before any manual search.
     outputs:
-      - name: rescue_period_text
+      - name: fallback_period_text
         type: string
         description: Exactly what was written to output_path.
+      - name: investigation_notes
+        type: string
+        description: What was tried, which candidate won and why, with its SDE, SNR and transit count; flags low confidence.
     inputs_to: end
 
   - name: end
     kind: end
-    description: The period file is written at output_path; the candidate carries the search evidence.
+    description: The period file has been written; the result points at it with the search record.
     inputs:
       - name: output_path
         type: string
-      - name: candidate
+      - name: candidates
+        type: list[*]
+      - name: search_summary
         type: object
 
 anti_patterns:
-  - Symmetric sigma clipping on the raw or flattened flux; transits are dips and get deleted. Clip the upper side (flares, cosmic rays) only.
-  - A flatten window near or above the rotation period (it leaves rotation residuals that TLS then reports as a false period), or shorter than ~3x the transit duration (it erases the transit).
-  - Calling TLS without flux_err, or detrending without carrying flux_err through.
-  - Writing the TLS or BLS grid period straight to the answer; grid periods are only good to a fraction of the peak width, and the trapezoid fit over all transits is ~10x more precise.
-  - Judging significance from the SDE of a narrow refinement search; use the broad-search SDE.
-  - Switching to 2P because TLS warns about transits without data, when the in-between epochs simply fall in gaps.
-  - Hardcoding a period or expected answer; every run must compute it from the given file.
-  - Writing anything but a single number rounded to 5 decimals (no units, no labels) to the output file.
-  - Putting intermediate files or test inputs inside the skill folder; use work_dir.
+  - Sigma-clipping the raw flux before flattening when the star is variable; it cuts the rotation peaks and troughs. Flatten first, then clip only upward outliers.
+  - Clipping low outliers at 3-5 sigma after flattening; transits are low outliers and deep ones get erased.
+  - A flatten window too long to follow the rotation signal and its P_rot/2 harmonic (residual spots masquerade as long, shallow box transits near P_rot/2 or P_rot) or shorter than ~3x the transit duration (the transit is flattened away).
+  - Taking the period from a flatten that did not mask the transits; the depth is suppressed and the period biased. Refine on a transit-masked re-flatten.
+  - Reporting the stellar rotation period (the strongest Lomb-Scargle peak) as the planet period.
+  - Accepting the top peak without checking 2x / 0.5x aliases via odd/even depths and the phase-0.5 depth.
+  - Dropping flux_err; BLS and TLS weight points by it (TLS needs it).
+  - Assuming the flag convention instead of checking it against the task text and the subset scatter.
+  - Running a full-range TLS search on unbinned 2-minute data inside a time budget; it can take many minutes. BLS first, TLS only on a narrow window or binned data.
+  - Writing a hardcoded or remembered period; the value must come from the file at hand.
+  - Writing anything but the single rounded number (no units, no label) to the output file.
 ```

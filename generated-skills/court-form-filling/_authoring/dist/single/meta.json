@@ -1,0 +1,28 @@
+{
+  "task": "court-form-filling",
+  "variant": "dist",
+  "label": "single",
+  "single": true,
+  "author_model": "claude-opus-5-5",
+  "claude_exit": 0,
+  "stage_data": "full",
+  "stage_instruction": true,
+  "started_workspace": "court-form-filling-dist-20261020-155504",
+  "recorded_at": "2026-10-20T16:06:37",
+  "produced": [
+    "sc100-form-filling"
+  ],
+  "ref": {
+    "variant": "dist",
+    "kind": "dist",
+    "skill_name": "skill-distillation",
+    "skill_source": {
+      "path": "distillation",
+      "repo_sha": "acb061d62f3f211bfc2c8a7491f20eed381ffd79",
+      "dirty": false
+    },
+    "format_version": null,
+    "recorded_at": "2026-10-20T14:44:03"
+  },
+  "workspace": "/Users/zach/dev/aip-skillbench/build/authoring/court-form-filling-dist-20261020-155504"
+}

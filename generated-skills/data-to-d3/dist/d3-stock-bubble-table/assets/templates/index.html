@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>__TITLE__</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <header class="page-header">
+        <h1>__TITLE__</h1>
+        <p class="subtitle">Bubble size = market capitalization (ETFs uniform), color = sector. Hover a bubble for details; click a bubble or a table row to highlight both.</p>
+    </header>
+    <main class="container">
+        <section class="panel chart-panel" id="chart-panel">
+            <h2>Stocks by sector</h2>
+            <div id="legend" class="legend"></div>
+            <div id="chart" class="chart"></div>
+        </section>
+        <section class="panel table-panel" id="table-panel">
+            <h2>Stock details</h2>
+            <div id="table-container" class="table-container"></div>
+        </section>
+    </main>
+    <div id="tooltip" class="tooltip"></div>
+    <script src="js/d3.v6.min.js"></script>
+    <script src="js/visualization.js"></script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+{
+  "_source": "OpenPowerlifting coefficient code quoted in source/powerlifting/SKILL.md. Sex M and Mx use the men's parameters; F uses the women's.",
+  "dots": {
+    "score_column": "Dots",
+    "form": "500 / (a*x^4 + b*x^3 + c*x^2 + d*x + e), x = bodyweight clamped to [min, max]; points = coefficient * total; 0 when bodyweight or total is 0",
+    "men":   {"poly_high_to_low": [-0.0000010930, 0.0007391293, -0.1918759221, 24.0900756, -307.75076], "min": 40.0, "max": 210.0},
+    "women": {"poly_high_to_low": [-0.0000010706, 0.0005158568, -0.1126655495, 13.6175032, -57.96288], "min": 40.0, "max": 150.0}
+  },
+  "wilks": {
+    "score_column": "Wilks",
+    "form": "500 / (a + b*x + c*x^2 + d*x^3 + e*x^4 + f*x^5), x = bodyweight clamped to [min, max]; points = coefficient * total; 0 when bodyweight or total is 0",
+    "men":   {"poly_high_to_low": [-1.291e-08, 7.01863e-06, -0.00113732, -0.002388645, 16.2606339, -216.0475144], "min": 40.0, "max": 201.9},
+    "women": {"poly_high_to_low": [-0.00000009054, 0.00004731582, -0.00930733913, 0.82112226871, -27.23842536447, 594.31747775582], "min": 26.51, "max": 154.53}
+  },
+  "ipf_goodlift": {
+    "score_column": "Goodlift",
+    "form": "points = total * max(0, 100 / (A - B*exp(-C*bodyweight))); 0 when bodyweight < 35, total is 0, or the (event, sex, equipment) has no parameters",
+    "equipment_groups": {
+      "Raw": ["Raw", "Wraps", "Straps"],
+      "Single": ["Single-ply", "Multi-ply", "Unlimited"]
+    },
+    "params": {
+      "SBD|M|Raw":    [1199.72839, 1025.18162, 0.009210],
+      "SBD|M|Single": [1236.25115, 1449.21864, 0.01644],
+      "SBD|F|Raw":    [610.32796, 1045.59282, 0.03048],
+      "SBD|F|Single": [758.63878, 949.31382, 0.02435],
+      "B|M|Raw":      [320.98041, 281.40258, 0.01008],
+      "B|M|Single":   [381.22073, 733.79378, 0.02398],
+      "B|F|Raw":      [142.40398, 442.52671, 0.04724],
+      "B|F|Single":   [221.82209, 357.00377, 0.02937]
+    }
+  }
+}

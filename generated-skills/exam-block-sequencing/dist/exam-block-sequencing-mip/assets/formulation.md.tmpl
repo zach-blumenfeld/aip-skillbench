@@ -1,0 +1,74 @@
+# Exam Block Sequencing: Problem Formulation and Solution Method
+
+## Problem
+
+Assign {n_blocks} exam blocks to {n_blocks} ordered exam slots (a permutation) so as to **minimize** the
+weighted student burden from closely packed exams. Slots are taken in the order given by the
+instance; "next slot" means the following slot in that order. Pair and triplet co-enrollment
+tables are **ordered**: keys follow the order the schedule induces and are never sorted or
+symmetrized; missing rows count as 0.
+
+## Objective (minimization)
+
+minimize  {weights_eve} * eve_morn_b2b_count + {weights_other} * other_b2b_count
+        + {weights_day} * same_day_triple_count + {weights_24} * cross_day_triple_count
+        + {weights_z} * z_three_in_four_count
+
+With block `a` at slot `s`, `b` at `s+1`, `c` at `s+2`, `d` at `s+3`:
+
+- **Adjacent-pair (back-to-back) burden.** eve_morn_b2b_count = sum over s in `eve_morn_start` of
+  pair[a,b]; other_b2b_count = sum over s in `other_b2b_start` of pair[a,b].
+- **Three-position (triple) burden.** same_day_triple_count = sum over s in `triple_day_start` of
+  triplet[a,b,c]; cross_day_triple_count = sum over s in `triple_24_start` of triplet[a,b,c].
+- **Overlapping four-slot pressure (three-in-four).** For every start s such that s and next(s)
+  are both qualifying three-slot window starts (day or 24-hour), add {overlap_terms}
+  (position offsets `{overlap_offsets}` from s). This is not the sum of all unordered triples
+  inside the four-slot span.
+
+## Decision variables
+
+- `x[b,s]` binary: block b is assigned to slot s.
+- `y[a,b,s]` continuous in [0,1]: block a in slot s and block b in slot next(s) (adjacent ordered pair).
+  Integral whenever x is integral because of the flow linking below.
+- `u[a,b,s,k]` continuous >= 0: weighted triplet cost for a pattern at offsets (0,1,k) from s whose first two
+  blocks are (a,b) (triple windows use k=2; overlap triplets of that shape share the same variables).
+- `v[a,s,k]` continuous >= 0: weighted triplet cost for a pattern at offsets (0,k,k+1) from s whose first block
+  is a (e.g. the skip-triple (a,c,d) with k=2).
+
+## Constraints
+
+- **Each block is assigned exactly once:** sum_s x[b,s] = 1 for every block b (no duplicates, no missing blocks).
+- **Each slot receives exactly one block:** sum_b x[b,s] = 1 for every slot s.
+- **Front-loading (eligibility):** x[b,s] = 0 for every large block b and every slot s not in
+  `early_slots` ({n_large} large blocks, {n_early} early slots). Inactive if the instance lists none.
+- **Virtual blocks** ({virtual}) are scheduled exactly like normal blocks.
+- **Pair linking (flow):** sum_b y[a,b,s] = x[a,s] and sum_a y[a,b,s] = x[b,next(s)]; y[a,a,s] is not created
+  (no repeated block in a window).
+
+## Linearization of each objective component
+
+- Back-to-back terms are linear in y: sum pair[a,b] * w_s * y[a,b,s] over the eligible starts.
+- Triplet terms of shape (0,1,k), including triple windows (k=2) and overlap triplets of that shape:
+  u[a,b,s,k] >= sum_c W_s[a,b,c] * x[c,s+k] - M_ab * (1 - y[a,b,s]), M_ab = max_c W_s[a,b,c],
+  where W_s is the weighted triplet table summed over all components scored at start s with that
+  shape. Because u is minimized, at an integral point u equals the exact cost when (a,b) occupies
+  (s,s+1) and 0 otherwise.
+- Triplet terms of shape (0,k,k+1), e.g. the overlap triplet (a,c,d):
+  v[a,s,k] >= sum_(c,d) W'_s[a,c,d] * y[c,d,s+k] - M_a * (1 - x[a,s]), M_a = max W'_s[a,.,.].
+- The solver objective therefore equals the official weighted objective at every integral solution
+  (checked after solving: solver incumbent vs independent recomputation).
+
+## Solution approach
+
+1. **Warm start (heuristic):** iterated local search over feasible permutations (steepest descent over all
+   swap, reversal and segment-move neighbours evaluated in batch, random-swap or double-bridge kicks, restarts),
+   {heur_seconds} s, seed {seed}, {heur_restarts} restarts; best objective {heur_obj}.
+2. **MIP solve:** the model above, minimized with the warm start supplied as an initial incumbent.
+
+{status_block}
+
+Final method: `{method}`. Final objective: **{objective}**.
+
+## Extraction and audit
+
+{extraction}

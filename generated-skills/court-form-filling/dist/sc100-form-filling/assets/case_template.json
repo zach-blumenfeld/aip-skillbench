@@ -1,0 +1,49 @@
+{
+  "plaintiffs": [
+    {
+      "name": "Full Name",
+      "phone": "as written in the case statement",
+      "street": "123 Main St",
+      "city": "City",
+      "state": "CA",
+      "zip": "90000",
+      "mailing": null,
+      "email": "name@example.com"
+    }
+  ],
+  "plaintiff_fictitious_business": false,
+  "plaintiff_payday_lender": false,
+  "defendants": [
+    {
+      "name": "Full Name or Business Name",
+      "phone": "",
+      "street": "456 Oak Ave",
+      "city": "City",
+      "state": "CA",
+      "zip": "90000",
+      "mailing": null,
+      "agent": null
+    }
+  ],
+  "defendant_military": false,
+  "claim_amount": "1500",
+  "why_owed": "One or two factual sentences.",
+  "incident_date": null,
+  "period_start": "2025-01-01",
+  "period_end": "2025-02-01",
+  "how_calculated": "One or two factual sentences.",
+  "need_more_space": false,
+  "asked_to_pay": true,
+  "why_not_asked": "",
+  "venue": "a",
+  "venue_other": "",
+  "venue_zip": "90000",
+  "attorney_fee_dispute": false,
+  "had_arbitration": false,
+  "public_entity": false,
+  "public_claim_filed_date": null,
+  "more_than_12_claims": false,
+  "filing_date": "2025-03-01",
+  "court_name_address": "",
+  "case_name": ""
+}
