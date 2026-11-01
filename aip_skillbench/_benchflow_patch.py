@@ -159,20 +159,24 @@ def publish_script(pack: str) -> str:
 
 # Copied into /home/<sandbox_user>/.claude/ by benchflow's setup_sandbox_user (the
 # .claude dir is one of the home dirs it materialises from /root), where Claude Code
-# loads it as user memory. One text per AIP mode, kept equally short and directive;
-# `human-curated` gets none.
-NUDGE_MEMORY = {
-    # `eval --mode skill --nudge`: an ablation knob, off by default. A mounted pack is
-    # activated by its own description like any Agent Skill; this text names it as the
-    # mandatory first action instead.
-    "skill": """\
+# loads it as user memory. One text for every mounted-skill mode (`skill` and
+# `human-curated` share it, so activation is held constant across formats) and one for
+# `aip-runtime`, kept equally short and directive.
+#
+# Why the mounted-skill text exists (campaign-28, 2026-10-08, Haiku 5.5 thinking off):
+# without it the solver opened the curated skill in 23 of 126 human-curated cells, so a
+# no-nudge run measures discoverability as much as the skill. `--nudge` is the knob.
+_MOUNTED_SKILL_MEMORY = """\
 # Skills (mandatory)
 
 Your FIRST action on any task, before reading data or writing code: look at the skills
 under `~/.claude/skills/`. If one matches the task, you MUST use it as its SKILL.md says,
 running its scripts and following its procedure rather than writing your own solution.
 Only if no skill matches do you solve the task yourself.
-""",
+"""
+NUDGE_MEMORY = {
+    "skill": _MOUNTED_SKILL_MEMORY,
+    "human-curated": _MOUNTED_SKILL_MEMORY,
     # `eval --mode aip-runtime`: on by default. Nothing task-specific is mounted, so the
     # solver is told where to look (campaign-1, 2026-10-06: two of five cells never ran
     # `aip search` without this).

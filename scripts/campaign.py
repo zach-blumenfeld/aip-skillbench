@@ -30,6 +30,7 @@ sys.path.insert(0, str(ROOT))
 from aip_skillbench._aip import VARIANTS, Variant, validate_packs  # noqa: E402
 
 GENERATED = ROOT / "generated-skills"
+VENDOR_TASKS = ROOT / "vendor" / "skillsbench" / "tasks"
 COLLECTIONS = ("1", "5", "10", "27", "ablation")
 AIP_RUNTIME_MODES = {"aip-runtime", "aip-from-curated"}  # the alias: campaign dirs from before 2026-10-20
 SEARCH_HIT = re.compile(r"^[\w.-]+@[0-9a-f]{8,}\s+\d", re.M)
@@ -109,16 +110,40 @@ def _console_json(text: str) -> dict | None:
     return obj if isinstance(obj, dict) else None
 
 
-def signals(trial_dir: str | None) -> dict:
-    s = {"skill": "-", "search": 0, "run_resume": 0, "paused": 0, "failed": 0, "done": False,
+def _skill_descriptions(skills_root: Path | None) -> list[str]:
+    """The first 40 characters of each mounted skill's frontmatter description."""
+    out: list[str] = []
+    for md in sorted(skills_root.glob("*/SKILL.md")) if skills_root and skills_root.is_dir() else []:
+        m = re.search(r"^description:\s*[\"']?(.*)", md.read_text(), re.M)
+        if m:
+            out.append(" ".join(m.group(1).split())[:40])
+    return [d for d in out if len(d) >= 20]
+
+
+def signals(trial_dir: str | None, skills_root: Path | None = None) -> dict:
+    s = {"skill": "-", "read": False, "search": 0, "run_resume": 0, "paused": 0, "failed": 0, "done": False,
          "json_steps": 0, "aip_mentions": 0}
     if not trial_dir:
         return s
-    traj = Path(trial_dir) / "agent" / "acp_trajectory.jsonl"
-    if not traj.exists():
+    # benchflow writes the trajectory under agent/ and a copy under trajectory/; a trial
+    # that errored (wall-clock budget) can have only the latter.
+    traj = next((p for p in (Path(trial_dir) / "agent" / "acp_trajectory.jsonl",
+                             Path(trial_dir) / "trajectory" / "acp_trajectory.jsonl") if p.exists()), None)
+    if traj is None:
         return s
     raw = traj.read_text()
     s["aip_mentions"] = raw.count('"aip ') + raw.count("`aip ")
+    # `read`: explicit evidence that the solver opened a mounted skill, by any route. The
+    # trajectory records each tool call's label and console output, never the command, so
+    # three signs are accepted: the Skill tool's "Launching skill:" line, the skills folder
+    # or a SKILL.md named in a label or output, or a mounted skill's description text
+    # echoed in an output (a `cat` of its SKILL.md). Nothing else counts; a bare skill
+    # folder name is not evidence (curated names like `pdf` or `xlsx` occur everywhere).
+    s["read"] = (
+        "Launching skill:" in raw
+        or bool(re.search(r"\.claude/skills|SKILL\.md", raw))
+        or any(d in raw for d in _skill_descriptions(skills_root))
+    )
     skills: list[str] = []
     for line in raw.splitlines():
         try:
@@ -152,6 +177,15 @@ def signals(trial_dir: str | None) -> dict:
             s["json_steps"] += 1
     s["skill"] = ",".join(skills) or "-"
     return s
+
+
+def _skills_root(task: str, scenario: str, mode: str, variant: str | None) -> Path | None:
+    """Host folder of the skills that scenario mounted for the task, for the `read` signal."""
+    if mode == "human-curated":
+        return VENDOR_TASKS / task / "environment" / "skills"
+    if variant and variant in VARIANTS:
+        return VARIANTS[variant].pack_root(task)
+    return None
 
 
 def _mean(xs: list) -> str:
@@ -204,20 +238,22 @@ def cmd_report(out: str) -> int:
     if not cells:
         return 0
     print("\nPer-cell signals (aip-runtime: search hits, run/resume results, pauses, failures, done; "
-          "AIP packs mounted as a skill: JSON step outputs, `aip` mentions; every skill scenario: the skill launched)")
+          "AIP packs mounted as a skill: JSON step outputs, `aip` mentions; every mounted-skill scenario: "
+          "whether the solver opened the skill at all (read) and the Skill-tool launch (skill))")
     print(f"{'scenario':<12}{'task':<44}{'t':>2}{'reward':>7}{'tools':>6}{'wall s':>8}  signals")
     kinds = {n: (m, (VARIANTS[v].is_aip if v and v in VARIANTS else m in ("aip-spec", *AIP_RUNTIME_MODES))) for n, m, v in skilled}
+    kinds_variant = {n: v for n, _, v in skilled}
     for r in cells:
         name = _scenario_of(r)
         mode, is_aip = kinds[name]
-        s = signals(r.get("trial_dir"))
+        s = signals(r.get("trial_dir"), _skills_root(r["task"], name, mode, kinds_variant.get(name)))
         if mode in AIP_RUNTIME_MODES:
             sig = (f"skill={s['skill']} search={s['search']} run/resume={s['run_resume']} "
                    f"paused={s['paused']} failed={s['failed']} done={'yes' if s['done'] else 'NO'}")
         elif is_aip:
-            sig = f"skill={s['skill']} json_steps={s['json_steps']} aip_mentions={s['aip_mentions']}"
+            sig = f"read={'yes' if s['read'] else 'NO'} skill={s['skill']} json_steps={s['json_steps']} aip_mentions={s['aip_mentions']}"
         else:
-            sig = f"skill={s['skill']}"
+            sig = f"read={'yes' if s['read'] else 'NO'} skill={s['skill']}"
         reward = "-" if r["reward"] is None else f"{r['reward']:g}"
         wall = "-" if r["wall_clock"] is None else f"{r['wall_clock']:.0f}"
         tools = "-" if r["n_tool_calls"] is None else str(r["n_tool_calls"])

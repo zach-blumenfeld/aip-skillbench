@@ -63,7 +63,7 @@ class Scenario:
     name: str
     mode: str
     variant: Optional[str] = None
-    nudge: Optional[bool] = None  # None = the mode's default (skill: off, aip-runtime: on)
+    nudge: Optional[bool] = None  # None = the mode's default (skill, human-curated: off; aip-runtime: on)
 
     @property
     def nudge_effective(self) -> bool:
@@ -99,8 +99,8 @@ class Scenario:
         nudge = item.get("nudge")
         if nudge is not None and not isinstance(nudge, bool):
             raise typer.BadParameter(f"scenario {item.get('name')!r}: `nudge` must be true or false")
-        if nudge and mode not in VARIANT_MODES:
-            raise typer.BadParameter(f"scenario {item.get('name')!r}: `nudge` applies to skill and aip-runtime only")
+        if nudge and mode not in VARIANT_MODES and mode is not Mode.human_curated:
+            raise typer.BadParameter(f"scenario {item.get('name')!r}: `nudge` applies to skill, human-curated and aip-runtime only")
         name = item.get("name") or (f"{mode.value}:{variant}" if variant else mode.value)
         return cls(name=str(name), mode=mode.value, variant=variant, nudge=nudge)
 
@@ -340,7 +340,7 @@ def eval_command(cell: Cell, scenario: Scenario, agent: str, sandbox: str, jobs_
     ]
     if scenario.variant:
         cmd += ["--variant", scenario.variant]
-    if scenario.mode == Mode.skill.value:
+    if scenario.mode in (Mode.skill.value, Mode.human_curated.value):
         cmd.append("--nudge" if scenario.nudge_effective else "--no-nudge")
     elif scenario.mode == Mode.aip_runtime.value:
         cmd.append("--aip-nudge" if scenario.nudge_effective else "--no-aip-nudge")

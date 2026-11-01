@@ -41,15 +41,21 @@ tasks:
 models:
   - claude-haiku-5-5
 # One row per scenario: the solver mode, the compile variant whose pack the container
-# gets, and whether the memory nudge is written. Mounted-skill scenarios get no nudge
-# (the skill's own description does the activation); aip-rt keeps its nudge because
-# nothing task-specific is mounted there.
+# gets, and whether the memory nudge is written. The five base scenarios give mounted
+# skills no nudge (the skill's own description does the activation); aip-rt keeps its
+# nudge because nothing task-specific is mounted there.
 scenarios:
-  - {name: human,    mode: human-curated}
+  - {name: human,    mode: human-curated,                   nudge: false}
   - {name: dist,     mode: skill,       variant: dist,      nudge: false}
   - {name: aip-v03,  mode: skill,       variant: aip-0.3a3, nudge: false}
   - {name: aip-spec, mode: skill,       variant: aip-0.6a1, nudge: false}
   - {name: aip-rt,   mode: aip-runtime, variant: aip-0.6a1, nudge: true}
+  # The same three mounted-skill arms with the memory nudge (one text for every format),
+  # so skill content can be compared against aip-rt with activation held constant.
+  # Added 2026-10-20; the report's `read` column shows activation per cell in every arm.
+  - {name: human-n,    mode: human-curated,                   nudge: true}
+  - {name: dist-n,     mode: skill,       variant: dist,      nudge: true}
+  - {name: aip-spec-n, mode: skill,       variant: aip-0.6a1, nudge: true}
 trials: 5
 concurrency: 10
 decision_model: false

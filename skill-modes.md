@@ -56,7 +56,8 @@ uv run aip-skillbench eval --task 3d-scan-calc --model claude-haiku-4-5 --mode n
 Mounts the human-authored skill that ships with the task. This is what the SkillsBench paper calls the "With Skills" condition.
 
 ```bash
-uv run aip-skillbench eval --task 3d-scan-calc --model claude-haiku-4-5 --mode human-curated
+uv run aip-skillbench eval --task 3d-scan-calc --model claude-haiku-4-5 --mode human-curated          # the paper's condition: skill available, use is the solver's choice
+uv run aip-skillbench eval --task 3d-scan-calc --model claude-haiku-4-5 --mode human-curated --nudge  # plus the mounted-skill memory file (see Memory files)
 ```
 
 Skill location (host, read-only): `vendor/skillsbench/tasks/<task>/environment/skills/<skill-name>/`.
@@ -133,9 +134,15 @@ Two texts live side by side in `aip_skillbench/_benchflow_patch.py` (`NUDGE_MEMO
 to `/root/.claude/CLAUDE.md` before the sandbox user exists (benchflow copies it into
 `/home/agent/.claude/`) and as `<cwd>/CLAUDE.md`. `aip-runtime` writes its text by default
 (nothing task-specific is mounted, so the solver is told to `aip search` first;
-`--no-aip-nudge` is the ablation). `skill` writes none by default: the mounted pack is
-activated by its own description like any Agent Skill; `--nudge` is the knob. The patch
-logs `aip memory (<mode>) written` and `timing.json` carries `memory_file` (seconds).
+`--no-aip-nudge` is the ablation). `skill` and `human-curated` share one mounted-skill
+text and write none by default: the mounted skill is activated by its own description
+like any Agent Skill; `--nudge` is the knob, the same text for both so activation is
+held constant across formats. Whether the solver opens a mounted skill at all varies by
+format and by model, so the ablation campaign runs each mounted-skill scenario both ways:
+the base arms measure the skill as shipped, the nudged arms compare skill content with
+activation held constant. The patch logs `aip memory (<mode>) written` and `timing.json`
+carries `memory_file` (seconds); `scripts/campaign.py report` prints `read=yes|NO` per
+cell, whether the solver opened the skill by any route.
 
 ### Decision steps
 
@@ -152,7 +159,7 @@ uv run aip-skillbench eval --task 3d-scan-calc --model claude-haiku-5-5 --mode s
 uv run aip-skillbench eval --task 3d-scan-calc --model claude-haiku-5-5 --mode skill --variant dist
 ```
 
-What `eval` sets: `--skills-dir generated-skills/<task>/<variant>`, and `AIP_SKILLBENCH_NUDGE=skill` only with `--nudge`.
+What `eval` sets: `--skills-dir generated-skills/<task>/<variant>`, and `AIP_SKILLBENCH_NUDGE=skill` only with `--nudge` (`human-curated` sets `--skills-dir` to the task's curated folder and `AIP_SKILLBENCH_NUDGE=human-curated` the same way).
 
 Container paths:
 

@@ -47,7 +47,7 @@ class Mode(str, Enum):
     noskill = "noskill"                          # instruction and fixtures only
     human_curated = "human-curated"              # the task's curated skills, as shipped
     selfgen_skill_creator = "selfgen-skill-creator"  # a skill the solver writes at trial time
-    skill = "skill"                              # a variant's pack mounted as a skill (--variant; --nudge off by default)
+    skill = "skill"                              # a variant's pack mounted as a skill (--variant; --nudge off by default, as for human-curated)
     aip_runtime = "aip-runtime"                  # a variant's pack published to an in-container aip server (--variant)
 
 
@@ -266,9 +266,9 @@ def eval(
     jobs_dir: Path = typer.Option(None, help="Override jobs/ output dir."),
     nudge: bool = typer.Option(
         False, "--nudge/--no-nudge",
-        help="skill only: write the mounted-skill memory file (~/.claude/CLAUDE.md) naming the skill "
-             "as the mandatory first action. Off by default: the skill's own description does the "
-             "activation. The ablation knob.",
+        help="skill and human-curated: write the mounted-skill memory file (~/.claude/CLAUDE.md) "
+             "naming the skill as the mandatory first action. Off by default: the skill's own "
+             "description does the activation. The ablation knob.",
     ),
     aip_nudge: bool = typer.Option(
         True, "--aip-nudge/--no-aip-nudge",
@@ -304,8 +304,8 @@ def eval(
         raise typer.BadParameter(f"--mode {mode.value} needs --variant (one of {', '.join(VARIANTS)})", param_hint="'--variant'")
     if mode not in VARIANT_MODES and variant_name:
         raise typer.BadParameter(f"--variant applies only to --mode skill / aip-runtime (got {mode.value})", param_hint="'--variant'")
-    if nudge and mode is not Mode.skill:
-        raise typer.BadParameter(f"--nudge applies only to --mode skill (got {mode.value})", param_hint="'--nudge'")
+    if nudge and mode not in (Mode.skill, Mode.human_curated):
+        raise typer.BadParameter(f"--nudge applies only to --mode skill / human-curated (got {mode.value})", param_hint="'--nudge'")
     if decision_model and mode is not Mode.aip_runtime:
         raise typer.BadParameter(
             f"--decision-model applies only to --mode aip-runtime (got {mode.value})",
@@ -337,6 +337,8 @@ def eval(
         extra: list[str] = []
     elif mode is Mode.human_curated:
         extra = ["--skills-dir", str(_curated_skills_dir(task))]
+        if nudge:
+            env[NUDGE_ENV] = mode.value
     elif mode is Mode.selfgen_skill_creator:
         # Pin skill-creator to the SkillsBench-vendored copy for reproducibility,
         # regardless of what's in the user's ~/.claude/skills/.

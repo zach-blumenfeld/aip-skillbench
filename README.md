@@ -37,14 +37,16 @@ The solver **mode** says what the trial container gets:
 | Mode | In the trial container | Measures |
 |---|---|---|
 | `noskill` | nothing | baseline |
-| `human-curated` | the task's bundled human-authored skills | the "With Skills" condition |
+| `human-curated` | the task's bundled human-authored skills; `--nudge` (off by default) adds the same memory file as `skill` | the "With Skills" condition |
 | `selfgen-skill-creator` | a skill the model writes at trial time (paper-style self-gen) | self-generation |
 | `skill --variant V` | V's pack mounted as a skill; nothing installed; `--nudge` (off by default) adds a memory file naming it as the first action | the compiled skill, as a skill: an AIP pack's runtime block has the solver execute the graph itself |
 | `aip-runtime --variant V` | only the generic `aip-runtime` skill; V's pack is published to an `aip server` in the container; `AIP_SERVER` set; the `aip-runtime` memory file (on by default) | the Protocol: `aip search` → `aip run <name>` → answer pauses |
 
 A campaign names **scenarios**, `{name, mode, variant?, nudge?}`; the one in
 [`configs/campaign-ablation.yaml`](configs/campaign-ablation.yaml) runs five
-(`human`, `dist`, `aip-v03`, `aip-spec`, `aip-rt`) on 28 tasks. The design is in
+(`human`, `dist`, `aip-v03`, `aip-spec`, `aip-rt`) on 28 tasks, plus nudged copies of the
+three mounted-skill arms (`human-n`, `dist-n`, `aip-spec-n`) that hold skill activation
+constant against `aip-rt`. The design is in
 [docs/aip-version-ablation-benchmark.md](docs/aip-version-ablation-benchmark.md).
 
 

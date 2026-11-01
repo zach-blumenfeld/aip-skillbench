@@ -1,11 +1,11 @@
 # AIP version and ablation benchmark
 
 Spec for the next campaign, decided 2026-10-20. Five scenarios on one 28-task cohort, one
-solver, 5 trials per cell: 700 cells. The question is what each layer adds: agent authoring
-without graph structure, the paper's AIP format, the current AIP format, and the current
-runtime.
+solver, 5 trials per cell: 700 cells, plus 420 for the three nudged arms added the same day
+(below). The question is what each layer adds: agent authoring without graph structure, the
+paper's AIP format, the current AIP format, and the current runtime.
 
-## The five scenarios
+## The scenarios
 
 | scenario | skill bytes | mounted in the container | memory nudge |
 |---|---|---|---|
@@ -14,6 +14,7 @@ runtime.
 | `aip-v03` | compiled with the AIP 0.3a3 authoring skill (the format the paper used) | the pack, as a skill | none |
 | `aip-spec` | compiled with the AIP 0.6a1 authoring skill | the pack, as a skill | none |
 | `aip-rt` | the same 0.6a1 pack bytes as `aip-spec` | only the generic `aip-runtime` skill; the pack is published to an in-container `aip server` | the aip-runtime memory file |
+| `human-n`, `dist-n`, `aip-spec-n` | the same bytes as `human`, `dist`, `aip-spec` | the same, as a skill | the mounted-skill memory file |
 
 Decisions behind the table:
 
@@ -23,9 +24,15 @@ Decisions behind the table:
 - The memory file ("your first action is ...") was introduced for `aip-runtime`, where
   nothing task-specific is mounted and two of five cells in the first campaign-1 run never
   touched the protocol. `aip-spec` got it only for symmetry with runtime and passed 5/5
-  before and after. In this experiment the mounted-skill scenarios are compared with each
-  other, so none of them gets a memory file; the skill's own description does the
-  activation. `aip-rt` keeps its nudge and the write-up says so.
+  before and after. The five base scenarios compare the mounted skills with each other as
+  the paper's "With Skills" condition does: no memory file, the skill's own description
+  does the activation. `aip-rt` keeps its nudge and the write-up says so.
+- Whether the solver opens a mounted skill at all is a factor in its own right, and it
+  varies by format and by model. The three `-n` arms write the mounted-skill memory file,
+  one text shared by every format, so skill content can be compared against `aip-rt` with
+  activation held constant, while the base arms keep measuring the skill as shipped.
+  `scripts/campaign.py report` prints `read=yes|NO` per cell so activation is visible in
+  every arm.
 - `aip-spec` and `aip-rt` share pack bytes, so the pair isolates the runtime.
 
 ## Compilation
@@ -100,8 +107,8 @@ Difficulty 5 easy, 13 medium, 10 hard and the category counts are unchanged.
   `aip-rt` has decisions to resolve.
 - The task's `instruction.md` is the solver's prompt in every scenario, as it always was.
 - 5 trials per cell, concurrency 10, docker sandbox, `claude-agent-acp`.
-- 700 cells, roughly $120 and 10-12 hours; run on the GCP box under tmux, resume across
-  days.
+- 700 cells for the five base scenarios, roughly $120 and 10-12 hours, and about 60% more
+  for the nudged arms; run on the GCP box under tmux, resume across days.
 
 ## Execution order
 
