@@ -49,6 +49,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shlex
 from datetime import datetime
 from pathlib import Path
@@ -223,9 +224,10 @@ async def _exec_or_raise(env: Any, what: str, script: str, timeout_sec: int) -> 
 
 async def _install_aip(env: Any, wheels: list[Path]) -> None:
     spec = [w for w in wheels if w.name.startswith("aip_spec-")]
-    aip = [w for w in wheels if w.name.startswith("aip-")]
+    # The runtime's wheel is aip-*.whl up to 0.6a1 and agent_instruction_protocol-*.whl from 0.7.0.
+    aip = [w for w in wheels if w.name.startswith(("aip-", "agent_instruction_protocol-"))]
     if len(spec) != 1 or len(aip) != 1:
-        raise RuntimeError(f"{WHEEL_ENV} needs one aip_spec-*.whl and one aip-*.whl, got {wheels}")
+        raise RuntimeError(f"{WHEEL_ENV} needs one aip_spec-*.whl and one aip-*.whl or agent_instruction_protocol-*.whl, got {wheels}")
     for w in (spec[0], aip[0]):
         await env.upload_file(w, f"/tmp/{w.name}")  # pip needs the real wheel filename
     script = install_script(f"/tmp/{spec[0].name}", f"/tmp/{aip[0].name}")
@@ -250,8 +252,11 @@ async def _publish_pack(env: Any, pack: Path) -> str:
     await env.exec(f"mkdir -p {AIP_PACKS_DIR}", timeout_sec=10)
     await env.upload_dir(pack, target)
     out = await _exec_or_raise(env, "aip publish", publish_script(target), timeout_sec=120)
-    ref = out.splitlines()[-1].strip() if out else ""
-    if "@" not in ref:
+    # `name@revision` on its own line; from 0.8 the validator's warnings (JSON lines,
+    # e.g. `unmeasured_route` on every no-decision-model pack) follow it, so scan every line.
+    refs = [ln.strip() for ln in (out or "").splitlines() if re.fullmatch(r"[\w.-]+@[0-9a-f]+", ln.strip())]
+    ref = refs[-1] if refs else ""
+    if not ref:
         raise RuntimeError(f"aip publish printed no name@revision for {pack}:\n{out}")
     logger.info("aip-skillbench: published %s", ref)
     return ref
