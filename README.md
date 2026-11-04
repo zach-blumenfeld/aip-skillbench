@@ -23,14 +23,15 @@ See the paper for the comparative findings across model + harness configurations
 **We add compiled-skill conditions here**, all experimental. An Opus author compiles
 each task's curated skills once into one pack under a **compile variant** (an authoring
 skill plus its toolchain and validation gate), the pack is committed, and every trial
-uses the same bytes: the author-once-consume-many pattern. Three variants exist
+uses the same bytes: the author-once-consume-many pattern. Four variants exist
 (`aip_skillbench/_variants.py`):
 
 | Variant | Authoring skill | What the pack is |
 |---|---|---|
 | `dist` | the distillation meta-skill in [`distillation/`](distillation/) | a plain Agent Skill of components and scripts: no graph, no AIP |
 | `aip-0.3a3` | the aip repo at tag `v0.3a3` (the format the AIP paper used) | an AIP skill: a schema-validated YAML body |
-| `aip-0.6a1` | the aip-spec authoring skill at `v0.6a1`, with aip `v0.6a1` | an AIP procedure: runtime block plus typed YAML graph; the only variant with a runtime |
+| `aip-0.6a1` | the aip-spec authoring skill at `v0.6a1`, with aip `v0.6a1` | an AIP procedure: runtime block plus typed YAML graph, with a runtime |
+| `aip-0.8.0` | the `aip-compile` skill from the aip repo at `v0.8.0` (one repo since 0.7.0: runtime, format, both skills) | a format-0.8 AIP procedure: explicit `start` step, `fallback: true` on every decision (the campaign runs without a decision model), with a runtime |
 
 The solver **mode** says what the trial container gets:
 
@@ -65,10 +66,11 @@ aip-skillbench/
 ├── runs/                          # run-matrix campaigns (gitignored)
 ├── vendor/skillsbench/            # submodule of benchflow-ai/skillsbench (read-only)
 └── build/<variant>/               # per variant, made by `bootstrap` (gitignored):
-    ├── src/{aip,aip-spec}/        #   clones (aip-0.3a3: aip only; dist: none)
+    ├── src/{aip,aip-spec}/        #   clones (aip-0.8.0 and aip-0.3a3: aip only; dist: none)
     ├── skill/<name>/              #   the authoring skill copied into every workspace
-    ├── wheels/                    #   aip-0.6a1: installed into aip-runtime containers
-    ├── aip-runtime-skill/         #   aip-0.6a1: only aip-runtime/SKILL.md
+    ├── bin/, tools/               #   aip-0.8.0: its own `aip` and `aip-spec` (uv tool installs)
+    ├── wheels/                    #   aip-0.8.0, aip-0.6a1: installed into aip-runtime containers
+    ├── aip-runtime-skill/         #   aip-0.8.0, aip-0.6a1: only aip-runtime/SKILL.md
     └── REF.json                   #   refs, shas, format version
 ```
 
@@ -86,17 +88,23 @@ cd aip-skillbench
 uv sync
 aip-skillbench bootstrap            # every variant: clones its repos into build/<variant>/src/,
                                     # copies its authoring skill to build/<variant>/skill/, and
-                                    # for aip-0.6a1 installs the host `aip` and `aip-spec` CLIs
-                                    # and builds the wheels; records generated-skills/REFS.json
+                                    # for the aip variants installs `aip` and `aip-spec` (0.6a1 on
+                                    # the host PATH, 0.8.0 under build/aip-0.8.0/bin) and builds
+                                    # the wheels; records generated-skills/REFS.json
 cp .env.example .env                # fill in ANTHROPIC_API_KEY
 aip-skillbench --help
 ```
 
 `bootstrap --variant V --force` rebuilds one variant; `--aip-sha <commit>` pins the aip
-clone for an exact reproduction (REFS.json has the shas). The variants' refs are
-constants in `aip_skillbench/_variants.py`. Each variant's gate runs from its own clone,
-so it does not depend on which `aip-spec` is on PATH; the `aip-0.6a1` gate treats the
-`runtime_block_outdated` warning as a failure, so no campaign mixes runtime-block versions.
+clone for an exact reproduction (REFS.json has the shas); `--aip-remote <dir-or-url>
+--aip-ref <branch>` builds from a checkout whose release is not tagged yet (recorded in
+REFS.json with the sha and whether the tree was dirty). The variants' refs are constants
+in `aip_skillbench/_variants.py`. Each variant's gate runs its own `aip-spec`, so it does
+not depend on which one is on PATH; the aip gates treat the `runtime_block_outdated`
+warning as a failure, so no campaign mixes runtime-block versions, and the `aip-0.8.0`
+gate also refuses a decision without `fallback: true` or a router with a `confidence`
+check, since the campaign runs without a decision model (see
+[docs/aip-0.8-variant.md](docs/aip-0.8-variant.md)).
 
 ### The `skill` and `aip-runtime` modes
 
@@ -106,7 +114,7 @@ skill. The pack is activated by its own description like any Agent Skill; `--nud
 (off by default) also writes a `~/.claude/CLAUDE.md` naming it as the mandatory first
 action, which is the ablation knob.
 
-`aip-runtime --variant V` (V must have a runtime: `aip-0.6a1`) mounts nothing
+`aip-runtime --variant V` (V must have a runtime: `aip-0.8.0` or `aip-0.6a1`) mounts nothing
 task-specific: before the agent starts, the benchflow patch
 (`aip_skillbench/_benchflow_patch.py`, driven by env vars `eval` sets) installs V's
 `aip-spec` and `aip` wheels into a venv at `/opt/aip` (`--no-deps`, runtime

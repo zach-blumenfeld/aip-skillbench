@@ -26,6 +26,7 @@ from aip_skillbench._aip import (
     VARIANTS,
     WHEEL_ENV,
     Variant,
+    aip_cli,
     aip_spec_wheel,
     aip_wheel,
     format_version,
@@ -95,6 +96,11 @@ def _require_aip(v: Variant) -> Path:
             f"authoring skill for variant {v.name} not found at {skill}. Run "
             f"`aip-skillbench bootstrap --variant {v.name}` first."
         )
+    if v.host_bin and not all((v.host_bin / c).exists() for c in ("aip", "aip-spec")):
+        raise typer.BadParameter(
+            f"variant {v.name} has no `aip`/`aip-spec` under {v.host_bin}. Run "
+            f"`aip-skillbench bootstrap --variant {v.name} --force`."
+        )
     return skill
 
 
@@ -141,15 +147,32 @@ def _author_api_key() -> tuple[str | None, str]:
     key = _read_dotenv(ROOT / ".env").get("ANTHROPIC_API_KEY")
     return key, (".env" if key else "inherited env")
 
-def _run(cmd: list[str], cwd: Path | None = None) -> None:
+def _run(cmd: list[str], cwd: Path | None = None, env: dict[str, str] | None = None) -> None:
     typer.echo("$ " + " ".join(cmd))
-    rc = subprocess.call(cmd, cwd=cwd)
+    rc = subprocess.call(cmd, cwd=cwd, env=env)
     if rc != 0:
         raise typer.Exit(rc)
 
 
+def _local_source(remote: str) -> dict[str, Any] | None:
+    """When `remote` is a directory on this machine (a checkout being tested before its
+    release is tagged), describe it: the path and whether its working tree is dirty
+    (uncommitted edits are not in the clone). None for a URL."""
+    path = Path(remote).expanduser()
+    if not path.is_dir():
+        return None
+    dirty = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True, cwd=path).stdout.strip()
+    return {"path": str(path.resolve()), "dirty": bool(dirty)}
+
+
 def _clone(remote: str, ref: str, dest: Path, sha: str | None) -> str:
-    """Clone `remote` at `ref` into `dest` (optionally detach at `sha`); return HEAD."""
+    """Clone `remote` at `ref` into `dest` (optionally detach at `sha`); return HEAD.
+    A local directory is cloned through file:// so the shallow clone works the same."""
+    local = _local_source(remote)
+    if local:
+        if local["dirty"]:
+            typer.echo(f"WARNING: {local['path']} has uncommitted changes; the clone takes committed {ref} only")
+        remote = f"file://{local['path']}"
     if sha:
         # A SHA cannot be cloned shallowly by name; take the ref, then fetch the commit.
         _run(["git", "clone", "--branch", ref, remote, str(dest)])
@@ -168,6 +191,16 @@ def bootstrap(
     aip_sha: Optional[str] = typer.Option(
         None, "--aip-sha", help="aip commit to check out after cloning (exact reproduction); applies to every named variant.",
     ),
+    aip_remote: Optional[str] = typer.Option(
+        None, "--aip-remote",
+        help="Clone aip from this URL or local directory instead of GitHub (to test a release "
+             "branch before it is tagged); recorded in REF.json. Applies to every named variant.",
+    ),
+    aip_ref: Optional[str] = typer.Option(
+        None, "--aip-ref",
+        help="aip branch or tag to clone instead of the variant's pin; recorded in REF.json. "
+             "Applies to every named variant.",
+    ),
     force: bool = typer.Option(False, help="Rebuild a variant whose build dir already exists."),
 ) -> None:
     """Set up the compile variants under build/<variant>/ (gitignored) and record their pins.
@@ -176,7 +209,13 @@ def bootstrap(
     (host CLIs, wheels, authoring skill, runtime skill, or just a copy of the skill), write
     build/<variant>/REF.json, and merge it into generated-skills/REFS.json (committed with
     the packs). Variant `aip-0.6a1` also installs `aip-spec` and `aip` on the host PATH,
-    which its authoring sessions need; the validation gates never depend on PATH.
+    which its authoring sessions need; `aip-0.8.0` installs its own under
+    build/aip-0.8.0/bin instead (prepended to PATH for its sessions only). The validation
+    gates never depend on PATH.
+
+    To test an aip release before it is tagged: `--aip-remote ~/dev/aip --aip-ref
+    release-0.8.0`; REF.json records the local path, the sha and whether the tree was
+    dirty. Re-run with `--force` and no overrides once the tag exists.
     """
     names = list(variants) or list(VARIANTS)
     bad = [n for n in names if n not in VARIANTS]
@@ -191,7 +230,7 @@ def bootstrap(
             shutil.rmtree(v.build_dir)
         v.build_dir.mkdir(parents=True)
         typer.echo(f"\n== {v.name} ({v.kind})")
-        ref = _bootstrap_variant(v, aip_sha)
+        ref = _bootstrap_variant(v, aip_sha, aip_remote, aip_ref)
         v.ref_file.write_text(json.dumps(ref, indent=2) + "\n")
         typer.echo(f"{v.name}: format={ref.get('format_version')}  recorded {v.ref_file.relative_to(ROOT)}")
     # Merge every built variant's REF.json into the committed REFS.json.
@@ -207,11 +246,36 @@ def bootstrap(
 _SKILL_COPY_IGNORE = shutil.ignore_patterns(".git", ".gitignore", "tests", "img", "__pycache__", "*.pyc", ".DS_Store")
 
 
-def _bootstrap_variant(v: Variant, aip_sha: Optional[str]) -> dict:
+def _bootstrap_variant(
+    v: Variant, aip_sha: Optional[str], aip_remote: Optional[str] = None, aip_ref: Optional[str] = None
+) -> dict:
     ref: dict[str, Any] = {"variant": v.name, "kind": v.kind, "skill_name": v.skill_name}
-    if v.kind == "aip":
+    remote, aref = aip_remote or AIP_REMOTE, aip_ref or v.aip_ref
+    if v.kind == "aip-mono":
+        # One repo: runtime, format (packages/aip-spec) and both skills. Its CLIs are
+        # installed per variant (UV_TOOL_DIR/UV_TOOL_BIN_DIR), never on the global PATH.
+        aip_src = v.src_dir("aip")
+        aip_head = _clone(remote, aref, aip_src, aip_sha)
+        tool_env = {**os.environ, "UV_TOOL_DIR": str(v.tools_dir), "UV_TOOL_BIN_DIR": str(v.bin_dir)}
+        _run(["uv", "tool", "install", "--force", "--editable", str(v.spec_src)], env=tool_env)
+        _run(["uv", "tool", "install", "--force", "--editable", f"{aip_src}[server]"], env=tool_env)
+        # Wheels for trial containers.
+        v.wheels_dir.mkdir()
+        for src in (v.spec_src, aip_src):
+            _run(["uv", "build", "--wheel", "--out-dir", str(v.wheels_dir), str(src)])
+        typer.echo(f"Built {aip_spec_wheel(v).name} and {aip_wheel(v).name} in {v.wheels_dir.relative_to(ROOT)}")
+        # Skills: `skill install --path` writes aip-compile/ (authoring, copied into
+        # workspaces) and aip-runtime/; trials mount a dir holding only aip-runtime/.
+        # AIP_HOME keeps the install record inside build/ instead of ~/.aip/skills.json.
+        skill_env = {**os.environ, "AIP_HOME": str(v.build_dir / "aip-home")}
+        _run([*aip_cli(v), "skill", "install", "--path", str(v.skill_dir)], env=skill_env)
+        _run([*aip_cli(v), "runtime", "--skill", "--out", str(v.runtime_skill_dir)])
+        ref["aip"] = {"remote": remote, "ref": aref, "sha": aip_head}
+        if (local := _local_source(remote)):
+            ref["aip"]["local"] = local
+    elif v.kind == "aip":
         aip_src, spec_src = v.src_dir("aip"), v.src_dir("aip-spec")
-        aip_head = _clone(AIP_REMOTE, v.aip_ref, aip_src, aip_sha)
+        aip_head = _clone(remote, aref, aip_src, aip_sha)
         spec_head = _clone(AIP_SPEC_REMOTE, v.aip_spec_ref, spec_src, None)
         # Host CLIs on PATH: the authoring checklist runs `aip-spec validate` and `aip run`.
         _run(["uv", "tool", "install", "--force", "--editable", str(spec_src)])
@@ -224,15 +288,15 @@ def _bootstrap_variant(v: Variant, aip_sha: Optional[str]) -> dict:
         # Skills: aip/ (authoring, copied into workspaces) and a dir holding only aip-runtime/ for trials.
         _run(["uv", "run", "--quiet", "--project", str(aip_src), "aip", "skill", "install", "--path", str(v.skill_dir)])
         _run(["uv", "run", "--quiet", "--project", str(aip_src), "aip", "runtime", "--skill", "--out", str(v.runtime_skill_dir)])
-        ref["aip"] = {"remote": AIP_REMOTE, "ref": v.aip_ref, "sha": aip_head}
+        ref["aip"] = {"remote": remote, "ref": aref, "sha": aip_head}
         ref["aip_spec"] = {"remote": AIP_SPEC_REMOTE, "ref": v.aip_spec_ref, "sha": spec_head}
     elif v.kind == "aip-legacy":
         aip_src = v.src_dir("aip")
-        aip_head = _clone(AIP_REMOTE, v.aip_ref, aip_src, aip_sha)
+        aip_head = _clone(remote, aref, aip_src, aip_sha)
         # The repo is the skill: copy it minus tests/ and images.
         shutil.copytree(aip_src, v.authoring_skill, ignore=_SKILL_COPY_IGNORE)
         _run(["uv", "run", "--quiet", str(v.authoring_skill / "scripts" / "validate.py"), "--help"])
-        ref["aip"] = {"remote": AIP_REMOTE, "ref": v.aip_ref, "sha": aip_head}
+        ref["aip"] = {"remote": remote, "ref": aref, "sha": aip_head}
     elif v.kind == "dist":
         assert v.skill_source is not None
         if not (v.skill_source / "SKILL.md").exists():
@@ -460,7 +524,7 @@ def convert(
     ws = A.make_workspace(task, v)
     A.stage_curated(ws, src_root, task_dir / "environment", instruction, stage_data)
     typer.echo(f"→ workspace {ws.relative_to(ROOT)}")
-    rc, transcript = A.run_author(ws, prompt, author_model, key)
+    rc, transcript = A.run_author(ws, prompt, author_model, key, path_prefix=v.host_bin)
     audit = A.audit_transcript(transcript, ws)
     meta = {
         "task": task, "variant": v.name, "label": "single", "single": True,

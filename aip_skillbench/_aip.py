@@ -4,7 +4,7 @@ Everything is per variant (aip_skillbench._variants): the clones, host CLIs, whe
 authoring skill, runtime skill, and the validation gate all live under build/<variant>/,
 populated by `aip-skillbench bootstrap`.
 
-- `spec_cli(v)`          how to invoke that variant's `aip-spec` CLI (kind "aip")
+- `spec_cli(v)` / `aip_cli(v)`   how to invoke that variant's `aip-spec` and `aip` CLIs (aip kinds)
 - `aip_wheel(v)` / `aip_spec_wheel(v)`   the wheels bootstrap built, uploaded into trial containers
 - `format_version(v)`    the format version the variant's validator reports
 - `validate_pack(v, d)`  the variant's gate on one skill folder
@@ -29,6 +29,7 @@ from aip_skillbench._variants import (  # noqa: F401  (re-exported for callers)
     VARIANTS,
     Variant,
     dist_gate,
+    no_model_gate,
     read_refs,
     variant,
 )
@@ -58,12 +59,27 @@ NUDGE_ENV = "AIP_SKILLBENCH_NUDGE"
 BAKE_ENV = "AIP_SKILLBENCH_BAKE_AGENT"
 
 
+AIP_KINDS = ("aip", "aip-mono")  # kinds with the aip toolchain (CLIs, wheels, runtime)
+
+
 def spec_cli(v: Variant) -> list[str]:
-    """Command prefix for the variant's `aip-spec` CLI, run from its own clone so the gate
-    does not depend on which version `uv tool install` last put on PATH."""
-    if v.kind != "aip":
-        raise ValueError(f"variant {v.name} has no aip-spec CLI")
-    return ["uv", "run", "--quiet", "--project", str(v.src_dir("aip-spec")), "aip-spec"]
+    """Command prefix for the variant's `aip-spec` CLI, never the one on PATH: kind "aip"
+    runs it from its own clone; kind "aip-mono" uses the variant's `uv tool` shim under
+    build/<name>/bin (bootstrap installs it there)."""
+    if v.kind == "aip-mono":
+        return [str(v.bin_dir / "aip-spec")]
+    if v.kind == "aip":
+        return ["uv", "run", "--quiet", "--project", str(v.spec_src), "aip-spec"]
+    raise ValueError(f"variant {v.name} has no aip-spec CLI")
+
+
+def aip_cli(v: Variant) -> list[str]:
+    """Command prefix for the variant's `aip` CLI (same rule as spec_cli)."""
+    if v.kind == "aip-mono":
+        return [str(v.bin_dir / "aip")]
+    if v.kind == "aip":
+        return ["uv", "run", "--quiet", "--project", str(v.src_dir("aip")), "aip"]
+    raise ValueError(f"variant {v.name} has no aip CLI")
 
 
 def _latest_wheel(v: Variant, pattern: str) -> Path:
@@ -76,7 +92,9 @@ def _latest_wheel(v: Variant, pattern: str) -> Path:
 
 
 def aip_wheel(v: Variant) -> Path:
-    return _latest_wheel(v, "aip-*.whl")
+    # The runtime's distribution is `aip` up to 0.6a1 and `agent-instruction-protocol`
+    # from 0.7.0 (the PyPI name `aip` was taken).
+    return _latest_wheel(v, "agent_instruction_protocol-*.whl" if v.kind == "aip-mono" else "aip-*.whl")
 
 
 def aip_spec_wheel(v: Variant) -> Path:
@@ -86,10 +104,10 @@ def aip_spec_wheel(v: Variant) -> Path:
 def format_version(v: Variant) -> str | None:
     """The format version the variant's tooling reports.
 
-    kind "aip": `aip-spec --version`. kind "aip-legacy": `metadata.aip.version` in the
+    aip kinds: `aip-spec --version`. kind "aip-legacy": `metadata.aip.version` in the
     skill's frontmatter. kind "dist": none.
     """
-    if v.kind == "aip":
+    if v.kind in AIP_KINDS:
         try:
             out = subprocess.run([*spec_cli(v), "--version"], capture_output=True, text=True, cwd=ROOT)
         except FileNotFoundError:
@@ -114,8 +132,9 @@ STRICT_WARNINGS = ("runtime_block_outdated",)
 
 
 def _validate_aip(v: Variant, skill_dir: Path) -> tuple[bool, str]:
-    """`aip-spec validate` (kind "aip"). Warnings come as JSON lines on stderr with exit 0;
-    any kind in STRICT_WARNINGS is a failure, reported by its validator message."""
+    """`aip-spec validate` (aip kinds). Warnings (and, from 0.8, infos) come as JSON lines
+    on stderr with exit 0; any kind in STRICT_WARNINGS is a failure, reported by its
+    validator message."""
     proc = subprocess.run([*spec_cli(v), "validate", str(skill_dir)], capture_output=True, text=True, cwd=ROOT)
     out = (proc.stdout + proc.stderr).strip()
     strict: list[str] = []
@@ -143,8 +162,14 @@ def _validate_legacy(v: Variant, skill_dir: Path) -> tuple[bool, str]:
 
 def validate_pack(v: Variant, skill_dir: Path) -> tuple[bool, str]:
     """Run the variant's gate on one skill folder. Returns (ok, combined output)."""
-    if v.kind == "aip":
-        return _validate_aip(v, skill_dir)
+    if v.kind in AIP_KINDS:
+        ok, out = _validate_aip(v, skill_dir)
+        if ok and v.kind == "aip-mono":
+            # Format 0.8 under the campaign's no-decision-model condition (_variants.py).
+            problems = no_model_gate(skill_dir)
+            if problems:
+                return False, "\n".join(problems)
+        return ok, out
     if v.kind == "aip-legacy":
         return _validate_legacy(v, skill_dir)
     problems = dist_gate(skill_dir)

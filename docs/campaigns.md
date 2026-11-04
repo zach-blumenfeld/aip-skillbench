@@ -103,8 +103,8 @@ cp /path/to/.env .                          # ANTHROPIC_API_KEY (gitignored; cop
 aip-spec --version                          # 0.5a1
 ls build/aip                                # aip_spec-*.whl and aip-*.whl
 python3 -c "import json;d=json.load(open('generated-skills/REFS.json'));print({k:v.get('format_version') for k,v in d.items()})"
-ls -d generated-skills/*/{dist,aip-0.3a3,aip-0.6a1}/*/ | wc -l                 # 84 for the ablation cohort
-for v in dist aip-0.3a3 aip-0.6a1; do uv run python scripts/campaign.py check ablation --variant $v | tail -1; done
+ls -d generated-skills/*/{dist,aip-0.3a3,aip-0.6a1,aip-0.8.0}/*/ | wc -l       # 112 for the ablation cohort
+for v in dist aip-0.3a3 aip-0.6a1 aip-0.8.0; do uv run python scripts/campaign.py check ablation --variant $v | tail -1; done
 docker info --format 'cpus={{.NCPU}} mem={{.MemTotal}}'
 ```
 
@@ -277,5 +277,7 @@ solver's client does); outputs land under `/root/`, which the verifier reads.
 - `build/` is disposable: `bootstrap` rebuilds every variant, and the authoring
   workspaces under `build/authoring/` are scratch.
 - `runs/` and `jobs/` are not committed.
-- Each variant's gate is its own validator; the `aip-0.6a1` gate rejects any pack with
-  an outdated runtime block, so a campaign never mixes block versions within a variant.
+- Each variant's gate is its own validator; the aip gates reject any pack with an
+  outdated runtime block, so a campaign never mixes block versions within a variant, and
+  the `aip-0.8.0` gate also rejects a decision without `fallback: true` or a router with a
+  `confidence` check (the campaign has no decision model; docs/aip-0.8-variant.md).

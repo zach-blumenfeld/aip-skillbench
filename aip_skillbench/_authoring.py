@@ -151,8 +151,12 @@ def stage_curated(
     return names
 
 
-def run_author(ws: Path, prompt: str, model: str, api_key: str | None) -> tuple[int, Path]:
-    """Run `claude -p` inside the workspace, capturing the stream-json transcript."""
+def run_author(
+    ws: Path, prompt: str, model: str, api_key: str | None, path_prefix: Path | None = None
+) -> tuple[int, Path]:
+    """Run `claude -p` inside the workspace, capturing the stream-json transcript.
+    `path_prefix` (a variant's build/<name>/bin) goes first on PATH so the session's `aip`
+    and `aip-spec` are that variant's."""
     transcript = ws / "transcript.jsonl"
     (ws / "prompt.md").write_text(prompt)
     cmd = [
@@ -164,6 +168,8 @@ def run_author(ws: Path, prompt: str, model: str, api_key: str | None) -> tuple[
     if api_key:
         env["ANTHROPIC_API_KEY"] = api_key
     env["AIP_HOME"] = str(ws / "scratch" / "aip-home")  # run files stay inside the workspace
+    if path_prefix:
+        env["PATH"] = f"{path_prefix}{os.pathsep}{env.get('PATH', '')}"
     with open(transcript, "w") as fh:
         proc = subprocess.run(cmd, cwd=ws, env=env, stdout=fh, stderr=subprocess.PIPE, text=True)
     if proc.stderr.strip():

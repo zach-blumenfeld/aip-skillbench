@@ -10,11 +10,13 @@ Runbook for the evaluation conditions defined in the [README](README.md). For ba
 | `human-curated` | human | task domain expertise (no file) | offline | committed `vendor/skillsbench/tasks/<task>/environment/skills/` |
 | `selfgen-skill-creator` | same model as solver | `vendor/skillsbench/tasks/<task>/instruction.md` | per trial (in-sandbox) | freshly-generated skill (sandbox-local, ephemeral) |
 | `skill --variant V` | Opus, under variant V's authoring skill | the task's curated skills, `instruction.md`, Dockerfile, environment inputs | once, locked | committed `generated-skills/<task>/V/<skill>/` mounted as a skill; `--nudge` adds a memory file (off by default) |
-| `aip-runtime --variant V` | Opus, under V (`aip-0.6a1`) | same pack as `skill --variant V` | once, locked | the pack published to an in-container `aip server`; only the generic `aip-runtime` skill mounted; the `aip-runtime` memory file (on by default) |
+| `aip-runtime --variant V` | Opus, under V (`aip-0.8.0` or `aip-0.6a1`) | same pack as `skill --variant V` | once, locked | the pack published to an in-container `aip server`; only the generic `aip-runtime` skill mounted; the `aip-runtime` memory file (on by default) |
 
 Variants (`aip_skillbench/_variants.py`): `dist` (the distillation meta-skill: a plain
-Agent Skill, no AIP), `aip-0.3a3` (the paper's AIP format), `aip-0.6a1` (the current AIP
-format; the only one with a runtime). The modes `aip-spec`, `aip-from-instruction`,
+Agent Skill, no AIP), `aip-0.3a3` (the paper's AIP format), `aip-0.6a1` (the format the
+ablation campaign A ran on) and `aip-0.8.0` (the current format; added 2026-11-04, see
+[docs/aip-0.8-variant.md](docs/aip-0.8-variant.md)); the last two have a runtime. The
+modes `aip-spec`, `aip-from-instruction`,
 `aip-from-curated`, and `model-dist` were removed on 2026-10-20: `aip-spec` is `skill
 --variant aip-0.6a1`, and campaign configs name scenarios (`{name, mode, variant, nudge}`)
 rather than modes, see [docs/campaigns.md](docs/campaigns.md).
@@ -96,10 +98,11 @@ Opus compiles all of a task's curated skills into **one** pack per variant
 (`convert --task T --variant V`): the originals preserved under `source/` with a
 `source/README.md` drop log, supporting scripts reproduced or adapted, and a `SKILL.md`
 in the variant's format (`dist`: a plain Agent Skill of components; `aip-0.3a3`: a
-schema-validated YAML body; `aip-0.6a1`: the verbatim runtime block plus a typed YAML
-procedure with `metadata.aip-version`). Locked, committed, and gated by the variant's
-validator (`aip-spec validate` for `aip-0.6a1`, strict on `runtime_block_outdated`; the
-0.3a3 skill's `scripts/validate.py`; the harness's own `dist_gate`). `skill` and
+schema-validated YAML body; `aip-0.6a1` and `aip-0.8.0`: the verbatim runtime block plus
+a typed YAML procedure with `metadata.aip-version`). Locked, committed, and gated by the
+variant's validator (`aip-spec validate` for the aip variants, strict on
+`runtime_block_outdated`, plus the no-decision-model gate for `aip-0.8.0`; the 0.3a3
+skill's `scripts/validate.py`; the harness's own `dist_gate`). `skill` and
 `aip-runtime` on the same variant use the same pack bytes.
 
 ```bash

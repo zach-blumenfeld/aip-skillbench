@@ -39,5 +39,17 @@
     },
     "format_version": null,
     "recorded_at": "2026-10-20T14:44:03"
+  },
+  "aip-0.8.0": {
+    "variant": "aip-0.8.0",
+    "kind": "aip-mono",
+    "skill_name": "aip-compile",
+    "aip": {
+      "remote": "git@github.com:zach-blumenfeld/aip.git",
+      "ref": "release-0.8.0",
+      "sha": "0e04386e451044ac531d07bdfbebeb6de2c37cc5"
+    },
+    "format_version": "0.8",
+    "recorded_at": "2026-11-04T12:16:49"
   }
 }

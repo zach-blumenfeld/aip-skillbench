@@ -56,6 +56,12 @@ scenarios:
   - {name: human-n,    mode: human-curated,                   nudge: true}
   - {name: dist-n,     mode: skill,       variant: dist,      nudge: true}
   - {name: aip-spec-n, mode: skill,       variant: aip-0.6a1, nudge: true}
+  # Format 0.8 (added 2026-11-04; docs/aip-0.8-variant.md): the same three arms as
+  # aip-spec / aip-rt / aip-spec-n on the aip-0.8.0 packs. No decision model: every
+  # decision in those packs sets `fallback: true` (the gate enforces it).
+  - {name: aip-08,     mode: skill,       variant: aip-0.8.0, nudge: false}
+  - {name: aip-08-rt,  mode: aip-runtime, variant: aip-0.8.0, nudge: true}
+  - {name: aip-08-n,   mode: skill,       variant: aip-0.8.0, nudge: true}
 trials: 5
 concurrency: 10
 decision_model: false

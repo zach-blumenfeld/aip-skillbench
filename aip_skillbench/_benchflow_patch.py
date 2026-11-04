@@ -13,8 +13,9 @@ CLI entry point (and the `bench` subprocess via `_bench_launcher`) gets them.
    - `AIP_SKILLBENCH_WHEELS` (colon-separated host paths to the aip-spec and aip
      wheels): uploaded and installed with `--no-deps` into a venv at /opt/aip
      created with --system-site-packages, then their runtime dependencies by name
-     from PyPI. The aip wheel pins `aip-spec @ git+…`, and many task images have
-     no git, hence wheels plus named deps. The venv keeps aip's dependencies out
+     from PyPI. The 0.6a1 aip wheel pins `aip-spec @ git+…` and many task images
+     have no git (the 0.8 wheel pins `aip-spec==<version>`, met by the spec wheel
+     installed beside it), hence wheels plus named deps. The venv keeps aip's dependencies out
      of system Python (benchflow's verifier scans system Python for pytest
      plugins) while execution-step scripts still see the task's preinstalled
      packages. `--ignore-requires-python` covers the aip wheel's `>=3.14` floor
@@ -95,7 +96,8 @@ if ! python3 -m venv --system-site-packages "$VENV" >/dev/null 2>&1; then
   fi
 fi
 PIP="$VENV/bin/python -m pip"
-# --no-deps: the aip wheel pins aip-spec to a git URL and many images have no git.
+# --no-deps: the 0.6a1 aip wheel pins aip-spec to a git URL and many images have no git;
+# the two wheels are installed together and the named deps follow.
 $PIP install --quiet --ignore-requires-python --no-deps {spec_wheel} {aip_wheel} >/dev/null 2>&1 \
   || $PIP install --ignore-requires-python --no-deps {spec_wheel} {aip_wheel}
 $PIP install --quiet {deps} >/dev/null 2>&1 || $PIP install {deps}

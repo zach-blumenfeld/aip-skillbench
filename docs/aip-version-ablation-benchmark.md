@@ -45,6 +45,7 @@ coexisting in the repo:
 | `dist` | `distillation/SKILL.md` | Agent Skills frontmatter, `name` equals the folder, `source/` present, every referenced file exists, and no AIP runtime block or fenced YAML procedure | `generated-skills/<task>/dist/` |
 | `aip-0.3a3` | the aip repo at tag `v0.3a3` (the repo was the skill then: SKILL.md, schemas, `scripts/validate.py`) | that validator | `generated-skills/<task>/aip-0.3a3/` |
 | `aip-0.6a1` | the aip-spec authoring skill at `v0.6a1`, aip at `v0.6a1` | `aip-spec validate` plus the functional test with `aip run` | `generated-skills/<task>/aip-0.6a1/` |
+| `aip-0.8.0` (added 2026-11-04) | the `aip-compile` skill in the aip repo at `v0.8.0` (one repo since 0.7.0) | `aip-spec validate` plus the no-decision-model gate (`fallback: true` on every decision, no router `confidence` check) plus the functional test with `aip run` | `generated-skills/<task>/aip-0.8.0/` |
 
 Each variant has its own toolchain under `build/<variant>/` and its own pin record; the
 single `AIP_REF.json` goes away. Authoring records stay beside the packs under

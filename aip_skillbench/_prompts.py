@@ -81,6 +81,47 @@ _DATA_NOTES = {
 }
 
 _NOTES = {
+    # aip 0.8.0: the aip-compile skill plus the variant's own `aip`/`aip-spec` on PATH.
+    "aip-mono": """\
+Follow the aip-compile skill's "Authoring an Agent Skill" checklist end to end: source/
+materials, SKILL.md with the verbatim format-0.8 runtime block and one fenced YAML
+procedure, `aip-spec validate ./out/<skill-name>` after every edit (the `aip-spec` and
+`aip` CLIs are on PATH), the line-by-line completeness check against the sources, and
+the functional test: write realistic start inputs to ./scratch/start.json and run
+`aip run ./out/<skill-name> --input ./scratch/start.json`, answering each pause with
+`aip resume <run-id> --input <answer.json>` (every pause prints its `run_id`), through
+to the end step, reaching every router branch at least once.
+
+The format 0.8 contract the validator enforces: exactly one `start` step holds the
+procedure's inputs (everything the caller supplies) and names the first runnable step in
+`inputs_to`; the pack's `requires` block names the interpreter with a minimum version
+the container's `python3` meets, every package the scripts import, and any other tool
+they call (the client checks it before the first script and stops naming what is
+missing); every execution and client_task step declares its `outputs`; every key a step
+consumes is produced on every path to it or declared on the start step, and every
+declaration of a key agrees on its type (a later step may overwrite a key; the validator
+reports that as `duplicate_producer`, so do it on purpose or not at all).
+
+No decision model exists where this skill will run: the downstream agent answers every
+decision by its own judgment. So every decision step MUST set `fallback: true` (without
+it the run stops with `no_decision_model`), and no router may carry a `confidence`
+check (a hand answer writes no confidence key, so the check would fire on every run and
+the router's value branches would never be taken); leave `confidence` lists off the
+decisions as well. The harness refuses a pack that breaks either rule; the validator's
+`unmeasured_route` warnings that follow are expected and fine.
+
+How `aip run` executes a script: it runs `<python> <script>` (or the step's `command`)
+with cwd set to the script's folder and one JSON object on stdin
+({"state": <the step's declared inputs only>, "assets", "expects"}); stdout must be one
+JSON object holding exactly the step's declared `outputs`. In the container that python
+has the container's system packages; in a local `aip run` here it is the aip CLI's own
+Python 3.14, which lacks the task's packages, so the `requires` check fails until they
+are visible. If the functional test needs them: `uv venv --python 3.14 ./scratch/venv &&
+uv pip install --python ./scratch/venv/bin/python <packages>`, then prefix the run with
+`PYTHONPATH="$(./scratch/venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')" aip run ...`
+(the `requires` check and the scripts inherit it; do the same for `aip resume`). That is
+all you need to know about the aip installation; do not read its source.""",
+
     # aip-spec 0.6a1 authoring skill plus the aip 0.6a1 client on PATH.
     "aip": """\
 Follow the aip skill's "Authoring an Agent Skill" checklist end to end: source/

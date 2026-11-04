@@ -137,8 +137,8 @@ sandbox: docker
 ```
 
 `modes:` is accepted as the same shorthand as a list of bare mode names. `variant` is
-one of `dist`, `aip-0.3a3`, `aip-0.6a1` (`aip_skillbench/_variants.py`); `aip-runtime`
-takes only a variant with a runtime (`aip-0.6a1`). `nudge` is the memory-file knob,
+one of `dist`, `aip-0.3a3`, `aip-0.6a1`, `aip-0.8.0` (`aip_skillbench/_variants.py`);
+`aip-runtime` takes only a variant with a runtime (`aip-0.8.0`, `aip-0.6a1`). `nudge` is the memory-file knob,
 defaulting to off for `skill` and on for `aip-runtime`.
 
 ```bash
